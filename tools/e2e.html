@@ -1,0 +1,3769 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#e0e5ec">
+<title>e2e · Recall</title>
+<link rel="stylesheet" href="../css/styles.css">
+<style>
+  /* 只用于输出结果，不影响被测组件 */
+  #out { white-space: pre-wrap; font: 12px/1.5 monospace; padding: 12px; }
+</style>
+</head>
+<body>
+
+<!-- 与 index.html 完全一致的骨架 -->
+<header class="topbar">
+  <div class="topbar__inner">
+    <button type="button" class="btn btn--ghost" id="btnBack" hidden>返回</button>
+    <span class="brand">
+      <span class="brand__dot" aria-hidden="true"></span>
+      <span class="topbar__title" id="topTitle">Recall</span>
+    </span>
+    <div class="topbar__actions">
+      <button type="button" class="btn btn--ghost" id="btnFinish" hidden>交卷</button>
+      <div class="theme-wrap">
+        <button type="button" class="btn btn--soft theme-btn" id="btnTheme" data-act="theme"
+          aria-haspopup="menu" aria-expanded="false" title="选择主题">跟随</button>
+        <div class="menu" id="themeMenu" role="menu" aria-labelledby="btnTheme" hidden></div>
+      </div>
+    </div>
+  </div>
+</header>
+<main id="app"></main>
+<div id="modalRoot"></div>
+<pre id="out"></pre>
+
+<script src="../js/data/java.js"></script>
+<script src="../js/data/web.js"></script>
+<script src="../js/data/changelog.js"></script>
+<script src="../js/core/judge.js"></script>
+<script src="../js/core/store.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/scope.js"></script>
+<script src="../js/core/session.js"></script>
+<script src="../js/core/round.js"></script>
+<script src="../js/core/wrongbook.js"></script>
+<script src="../js/core/stars.js"></script>
+<script src="../js/core/feedback.js"></script>
+<script src="../js/core/rich-text.js"></script>
+<script src="../js/core/api.js"></script>
+<script src="../js/ui/copy.js"></script>
+<script src="../js/ui/view-list.js"></script>
+<script src="../js/ui/view-start.js"></script>
+<script src="../js/ui/view-feedback.js"></script>
+<script src="../js/ui/view-quiz.js"></script>
+<script src="../js/ui/view-result.js"></script>
+<script src="../js/ui/view-records.js"></script>
+<script src="../js/ui/view-wrongbook.js"></script>
+<script src="../js/ui/view-changelog.js"></script>
+<script src="../js/app.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  var lines = [];
+  var pass = 0;
+  var fail = 0;
+
+  function log(s) { lines.push(s); }
+  function ok(name, cond, extra) {
+    if (cond) { pass++; log('PASS  ' + name); }
+    else { fail++; log('FAIL  ' + name + (extra ? '  <<< ' + extra : '')); }
+  }
+  function eq(name, actual, expected) {
+    var a = JSON.stringify(actual), e = JSON.stringify(expected);
+    ok(name, a === e, 'expected ' + e + ', got ' + a);
+  }
+
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function click(el) {
+    if (!el) return false;
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }
+  function text(sel) { var e = q(sel); return e ? e.textContent.trim() : ''; }
+  // 页面正文只取 #app：本文件自身是 <script> 也在 body 里，
+  // 直接读 appText() 会把断言文案（脚本源码）当成页面文字，从而假通过。
+  function appText() {
+    var el = document.getElementById('app');
+    return el ? el.textContent : '';
+  }
+  // 面板 / 确认框的正文在 #modalRoot 里，不在 #app 里
+  function panelText() {
+    var el = document.getElementById('modalRoot');
+    return el ? el.textContent.replace(/\s+/g, ' ') : '';
+  }
+  // 真实可见性：不能只看 hidden 属性，必须看渲染尺寸
+  function visible(el) {
+    if (!el) return false;
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+  }
+
+  function meta() { return text('.meta'); }
+  function currentIndex() {
+    var m = /第 (\d+)\/(\d+) 题/.exec(meta());
+    return m ? Number(m[1]) : -1;
+  }
+  function correctCount() {
+    var m = /已答对 (\d+) 道/.exec(meta());
+    return m ? Number(m[1]) : -1;
+  }
+  function goTo(n) {
+    var guard = 0;
+    while (currentIndex() < n && guard++ < 500) {
+      var btn = q('[data-act="next"]');
+      if (!btn) break;
+      click(btn);
+    }
+  }
+  // 点题库卡片 → 「开始一轮」面板 → 有进行中的一轮时默认「继续」，否则按选定范围开始
+  function openBank(key, scopeType) {
+    click(q('[data-bank="' + key + '"]'));
+    if (!q('[data-scope-type]')) return; // 面板没出现：让后面的断言去报错
+    var cont = q('[data-act="continue"]');
+    if (!scopeType && cont) {
+      click(cont); // 断点续做：等价于点「继续」
+      return;
+    }
+    if (scopeType && scopeType !== 'all') click(q('[data-scope-type="' + scopeType + '"]'));
+    var start = q('[data-act="start-round"]');
+    if (start && !start.disabled) click(start);
+  }
+  // 面板里的范围选择器
+  function panelOpen() { return !!q('[data-act="start-round"]'); }
+  function chooseScope(type) { click(q('[data-scope-type="' + type + '"]')); }
+  function chooseChapters(nos) {
+    for (var i = 0; i < nos.length; i++) click(q('[data-scope-chapter="' + nos[i] + '"]'));
+  }
+  function chooseRandom(n) { click(q('[data-scope-n="' + n + '"]')); }
+  function startBtn() { return q('[data-act="start-round"]'); }
+  function totalOfCurrentRound() {
+    var m = /第 \d+\/(\d+) 题/.exec(meta());
+    if (m) return Number(m[1]);
+    return -1;
+  }
+  function roundState() {
+    var s = window.QuizApp && window.QuizApp.session();
+    if (!s) return null;
+    return { ids: s.questionIds, total: s.questions.length, scope: s.scope, label: s.scopeLabel() };
+  }
+  function goBack(n) {
+    var guard = 0;
+    while (currentIndex() > n && guard++ < 500) {
+      var btn = q('[data-act="prev"]');
+      if (!btn) break;
+      click(btn);
+    }
+  }
+  // meta 行里的第一枚徽标 = 题型徽标（顶部范围徽标也是 .badge，必须限定在 .meta__tags 内）
+  function typeBadgeText() {
+    var el = q('.meta__tags .badge');
+    return el ? el.textContent.trim() : '';
+  }
+
+  /* ================= 视觉断言 ================= */
+  function shadowPairs(sh) {
+    var out = [], re = /(-?\d+)px (-?\d+)px/g, m;
+    while ((m = re.exec(sh)) !== null) out.push([Number(m[1]), Number(m[2])]);
+    return out;
+  }
+
+  function visualChecks() {
+    log('--- 视觉规范断言 ---');
+
+    var bodyBg = getComputedStyle(document.body).backgroundColor;
+    eq('背景是 #e0e5ec', bodyBg, 'rgb(224, 229, 236)');
+
+    // 没有任何元素是纯白背景
+    var white = qa('*').filter(function (el) {
+      var bg = getComputedStyle(el).backgroundColor;
+      return bg === 'rgb(255, 255, 255)' || bg === 'rgb(0, 0, 0)';
+    });
+    eq('没有纯白/纯黑背景元素', white.length, 0);
+
+    // 没有渐变
+    var grad = qa('*').filter(function (el) {
+      return getComputedStyle(el).backgroundImage.indexOf('gradient') >= 0;
+    });
+    eq('没有渐变背景', grad.length, 0);
+
+    // 没有 ≥2px 的边框
+    var thick = qa('*').filter(function (el) {
+      var cs = getComputedStyle(el);
+      var w = parseFloat(cs.borderTopWidth) || 0;
+      var l = parseFloat(cs.borderLeftWidth) || 0;
+      return Math.max(w, l) >= 2;
+    });
+    eq('没有 ≥2px 的粗边框', thick.length, 0);
+
+    // 卡片双影：右下暗影 + 左上亮影（桌面 8px / 移动端 4px 都接受）
+    var card = q('.card');
+    if (card) {
+      var sh = getComputedStyle(card).boxShadow;
+      var dark = /rgb\(184, 188, 194\) (\d+)px (\d+)px/.exec(sh);
+      var light = /rgb\(255, 255, 255\) (-\d+)px (-\d+)px/.exec(sh);
+      ok('卡片暗影在右下（正偏移）', !!dark && Number(dark[1]) > 0 && Number(dark[2]) > 0, sh);
+      ok('卡片亮影在左上（负偏移）', !!light && Number(light[1]) < 0 && Number(light[2]) < 0, sh);
+      ok('暗影与亮影偏移对称', !!dark && !!light && dark[1] === light[1].slice(1), sh);
+    }
+
+    // 选中选项是 inset 凹陷
+    var opt = q('.opt');
+    if (opt) {
+      ok('未选选项是凸起（非 inset）', getComputedStyle(opt).boxShadow.indexOf('inset') === -1);
+    }
+  }
+
+  function visualChecksSelected() {
+    var sel = q('.opt--selected');
+    if (sel) {
+      var sh = getComputedStyle(sel).boxShadow;
+      ok('选中选项是凹陷（inset）', sh.indexOf('inset') !== -1, sh);
+      var pairs = shadowPairs(sh);
+      ok('选中选项暗影仍为右下', pairs.some(function (p) { return p[0] > 0 && p[1] > 0; }), sh);
+      var keyBg = getComputedStyle(q('.opt--selected .opt__key')).backgroundColor;
+      eq('选中徽标变强调色', keyBg, 'rgb(109, 93, 252)');
+    } else {
+      ok('选中选项是凹陷（inset）', false, '找不到 .opt--selected');
+    }
+  }
+
+  function overflowChecks() {
+    log('--- 响应式断言（375px）---');
+    // 确保当前在答题页（底部操作区只在答题页存在）
+    if (!q('.actionbar')) {
+      if (q('[data-bank]')) openBank('java');
+    }
+    ok('当前在答题页', !!q('.actionbar'));
+
+    var de = document.documentElement;
+    ok('页面无横向滚动（scrollWidth <= clientWidth）', de.scrollWidth <= de.clientWidth + 1,
+      'scrollWidth=' + de.scrollWidth + ' clientWidth=' + de.clientWidth);
+    // 注：真实 375px 视口由 tools/e2e-narrow.html 验证（headless 窗口有最小宽度）
+
+    var btns = qa('.actionbar .btn');
+    ok('底部操作区有 3 个按钮', btns.length === 3, 'got ' + btns.length);
+    var tooSmall = btns.filter(function (b) { return b.getBoundingClientRect().height < 44; });
+    eq('底部按钮高度 ≥44px', tooSmall.length, 0);
+
+    // 选项触控区 ≥44（规范要求 ≥52 更好）
+    var opts = qa('.opt');
+    var smallOpts = opts.filter(function (o) { return o.getBoundingClientRect().height < 44; });
+    eq('选项触控区 ≥44px', smallOpts.length, 0);
+
+    // 底部操作区在视口内且 fixed
+    var bar = q('.actionbar');
+    if (bar) {
+      var r = bar.getBoundingClientRect();
+      ok('底部操作区贴在视口底部', Math.abs(r.bottom - window.innerHeight) < 2,
+        'bottom=' + r.bottom + ' vh=' + window.innerHeight);
+    }
+
+    // 代码块在窄屏下不撑破页面（横向滚动限制在 pre 内部）
+    var pre = q('.rich pre');
+    if (pre) {
+      ok('代码块宽度不超出视口', pre.getBoundingClientRect().width <= window.innerWidth,
+        'pre=' + pre.getBoundingClientRect().width + ' vw=' + window.innerWidth);
+      ok('代码块可横向滚动', getComputedStyle(pre).overflowX === 'auto', getComputedStyle(pre).overflowX);
+    }
+  }
+
+  /* ================= 首页（题库列表页）排版 ================= */
+  function homeChecks() {
+    log('--- 首页：Hero / 分布条 / 三入口 / 页脚 ---');
+    var docEl = document.documentElement;
+    var narrow = window.innerWidth < 768;
+
+    // H1：桌面 48px、手机 34px，700、行高 1.1、-1px 字距；前半句 --ink、后半句 --accent-ink
+    var h1 = q('.hero__title');
+    var h1cs = getComputedStyle(h1);
+    eq('首页标题文案', h1.textContent.trim(), window.QuizCopy.LIST_TITLE);
+    eq('首页 H1 字号（桌面 48 / 手机 34）', h1cs.fontSize, narrow ? '34px' : '48px');
+    ok('首页 H1 行高是 1.1 倍', Math.abs(parseFloat(h1cs.lineHeight) / parseFloat(h1cs.fontSize) - 1.1) < 0.02,
+      h1cs.lineHeight + ' / ' + h1cs.fontSize);
+    eq('首页 H1 字重 700', h1cs.fontWeight, '700');
+    ok('首页 H1 字距 -1px', Math.abs(parseFloat(h1cs.letterSpacing) + 1) < 0.1 && /px/.test(h1cs.letterSpacing),
+      'letter-spacing=' + h1cs.letterSpacing);
+    ok('首页 H1 用 --ink', h1cs.color === appVar('--ink'), h1cs.color);
+    ok('标题不换行（单行高度 ≈ 1.1 行高）',
+      h1.getBoundingClientRect().height <= parseFloat(h1cs.fontSize) * 1.1 + 2,
+      'h=' + h1.getBoundingClientRect().height);
+
+    // 标题拆两段：前半句正文色，后半句 .hero__accent 用强调色，同字号同字重
+    var acc = q('.hero__accent');
+    ok('标题有强调色后半句（.hero__accent）', !!acc);
+    if (acc) {
+      var acccs = getComputedStyle(acc);
+      eq('后半句文案', acc.textContent.trim(), window.QuizCopy.LIST_TITLE_ACCENT);
+      ok('前半句是正文色、后半句不是',
+        h1cs.color === appVar('--ink') && acccs.color !== appVar('--ink'),
+        h1cs.color + ' / ' + acccs.color);
+      ok('后半句用强调色 --accent-ink', acccs.color === appVar('--accent-ink'), acccs.color);
+      eq('后半句与前半句同字号', acccs.fontSize, h1cs.fontSize);
+      eq('后半句与前半句同字重', acccs.fontWeight, h1cs.fontWeight);
+      ok('H1 只有两段文字（前半句直接挂在 h1 上）',
+        h1.childNodes[0].nodeType === 3 && h1.childNodes[0].textContent.trim() === window.QuizCopy.LIST_TITLE_HEAD,
+        h1.innerHTML.slice(0, 120));
+    }
+
+    // Hero 整块不可选中（含标题、短横、副文案、统计胶囊），鼠标不是文本光标
+    var heroBox = q('.hero');
+    eq('Hero 不可选中', getComputedStyle(heroBox).userSelect, 'none');
+    eq('Hero 鼠标不是文本光标', getComputedStyle(heroBox).cursor, 'default');
+    eq('标题本身也不可选', getComputedStyle(h1).userSelect, 'none');
+    ok('品牌铭牌也不可选', getComputedStyle(q('.brand')).userSelect === 'none',
+      getComputedStyle(q('.brand')).userSelect);
+
+    // 首页整页是导航装饰：卡片标题/题数/图例、入口、底部两行、页脚全都不可选，
+    // 手机上长按不弹系统「复制 / 全选」菜单（-webkit-touch-callout: none）
+    eq('首页整页不可选中', getComputedStyle(q('.page--list')).userSelect, 'none');
+    eq('入口行继承不可选中', getComputedStyle(q('.bank-actions')).userSelect, 'none');
+    eq('底部行继承不可选中', getComputedStyle(q('.list-rows')).userSelect, 'none');
+    // 标题下的强调色短横：32×3、圆角 2、上间距 10、--accent
+    var rule = q('.hero__rule');
+    var rcs = getComputedStyle(rule), rbox = rule.getBoundingClientRect();
+    ok('短横宽 32px', Math.abs(rbox.width - 32) < 0.6, 'w=' + rbox.width);
+    ok('短横高 3px', Math.abs(rbox.height - 3) < 0.6, 'h=' + rbox.height);
+    eq('短横用强调色', rcs.backgroundColor, 'rgb(109, 93, 252)');
+    ok('短横圆角 2px', Math.abs(parseFloat(rcs.borderRadius) - 2) < 0.2, rcs.borderRadius);
+    ok('短横上间距 10px', Math.abs(parseFloat(rcs.marginTop) - 10) < 0.6, 'margin-top=' + rcs.marginTop);
+    eq('短横没有边框', rcs.borderTopWidth, '0px');
+
+    // 副文案：13px、--ink-2、与短横间距 8px、不带数字与实现细节
+    var sub = q('.hero__sub');
+    var subcs = getComputedStyle(sub);
+    ok('副文案上间距 8px', Math.abs(parseFloat(subcs.marginTop) - 8) < 0.6, 'margin-top=' + subcs.marginTop);
+    eq('副文案 13px', subcs.fontSize, '13px');
+    ok('副文案用 --ink-2', subcs.color === appInk2(), 'color=' + subcs.color);
+    ok('副文案里没有数字', !/\d/.test(sub.textContent), sub.textContent.trim());
+    ok('副文案不提浏览器/存储实现',
+      !/浏览器|localStorage|本机存储|缓存/i.test(sub.textContent), sub.textContent.trim());
+    eq('副文案文案', sub.textContent.trim(), window.QuizCopy.LIST_HINT);
+
+    // 统计胶囊：三个、高 32、padding 0 12、胶囊圆角、凹陷、数字 15/600、标签 12/--ink-3、间距 8
+    var pills = qa('.hero__pill');
+    eq('统计胶囊有 3 个', pills.length, 3);
+    eq('统计胶囊标签', pills.map(function (p) { return p.querySelector('.hero__label').textContent.trim(); }),
+      ['已练', '错题', '收藏']);
+    var p0 = pills[0] || q('.hero__pill');
+    var pcs = getComputedStyle(p0);
+    ok('胶囊高度 32px', Math.abs(p0.getBoundingClientRect().height - 32) < 0.6,
+      'h=' + p0.getBoundingClientRect().height);
+    ok('胶囊左右内边距 12px', Math.abs(parseFloat(pcs.paddingLeft) - 12) < 0.6, pcs.paddingLeft);
+    ok('胶囊是胶囊圆角', parseFloat(pcs.borderRadius) >= 32, pcs.borderRadius);
+    ok('胶囊是凹陷（box-shadow 含 inset）', pcs.boxShadow.indexOf('inset') !== -1, pcs.boxShadow);
+    var numcs = getComputedStyle(p0.querySelector('.hero__num'));
+    eq('胶囊数字 15px', numcs.fontSize, '15px');
+    eq('胶囊数字字重 600', numcs.fontWeight, '600');
+    eq('胶囊标签 12px', getComputedStyle(p0.querySelector('.hero__label')).fontSize, '12px');
+    var pillsBox = q('.hero__pills');
+    // 窄屏：胶囊在标题下方，上间距 20px；≥1024px 横排到右端，上间距为 0（高度靠底对齐）
+    var pillsMT = parseFloat(getComputedStyle(pillsBox).marginTop);
+    ok('统计行上间距（窄屏 20px / 宽屏横排 0）',
+      window.innerWidth >= 1024 ? Math.abs(pillsMT) < 0.6 : Math.abs(pillsMT - 20) < 0.6,
+      'margin-top=' + getComputedStyle(pillsBox).marginTop);
+    if (pills.length > 1) {
+      var pg = pills[1].getBoundingClientRect().left - pills[0].getBoundingClientRect().right;
+      ok('统计胶囊间距 8px', Math.abs(pg - 8) < 0.6, 'gap=' + pg.toFixed(1));
+    }
+
+    // 分布条：高 6、三段、段间 2、槽底 --mid、上间距 14
+    var bar = q('.dist__bar');
+    ok('分布条高 6px', Math.abs(bar.getBoundingClientRect().height - 6) < 0.6,
+      'h=' + bar.getBoundingClientRect().height);
+    // 注意：两个题库各有一条分布条，下面的 segs 只取第一条（Java），否则会数到 6 段
+    var segs = qa('.dist__bar')[0].querySelectorAll('.dist__seg');
+    segs = Array.prototype.slice.call(segs);
+    eq('分布条三段（单选/多选/判断）', segs.length, 3);
+    var tops = segs.map(function (s) { return Math.round(s.getBoundingClientRect().top); });
+    eq('分布条三段在同一行', tops.filter(function (t) { return t !== tops[0]; }).length, 0);
+    if (segs.length > 1) {
+      var sg = segs[1].getBoundingClientRect().left - segs[0].getBoundingClientRect().right;
+      ok('分布条段间空隙 2px', Math.abs(sg - 2) < 0.6, 'gap=' + sg.toFixed(1));
+    }
+    ok('分布条槽底用 --mid', getComputedStyle(bar).backgroundColor === appVar('--mid'),
+      getComputedStyle(bar).backgroundColor);
+    eq('单选段用强调色', getComputedStyle(segs[0]).backgroundColor, 'rgb(109, 93, 252)');
+    eq('多选段用 --ok', getComputedStyle(segs[1]).backgroundColor, appVar('--ok'));
+    eq('判断段用 --ink-3', getComputedStyle(segs[2]).backgroundColor, appVar('--ink-3'));
+    ok('分布条上间距 14px', Math.abs(parseFloat(getComputedStyle(q('.dist')).marginTop) - 14) < 0.6,
+      'margin-top=' + getComputedStyle(q('.dist')).marginTop);
+
+    // 图例：12px --ink-3、上间距 6px、文案带三段数量
+    var legend = q('.dist__legend');
+    eq('图例 12px', getComputedStyle(legend).fontSize, '12px');
+    ok('图例用 --ink-3', getComputedStyle(legend).color === appVar('--ink-3'),
+      getComputedStyle(legend).color);
+    ok('图例上间距 6px', Math.abs(parseFloat(getComputedStyle(q('.dist')).gap) - 6) < 0.6,
+      'gap=' + getComputedStyle(q('.dist')).gap);
+    eq('Java 图例文案', q('[data-bank="java"] .dist__legend').textContent.trim(), '单选 192 · 多选 12 · 判断 15');
+
+    // 卡片：padding 用 --pad-card、标题 18/600（比 H1 低一档）、meta 13px
+    var card = q('.card--clickable');
+    eq('卡片内边距用 --pad-card', getComputedStyle(card).paddingTop, appVar('--pad-card'));
+    eq('题库标题 18px', getComputedStyle(card.querySelector('.h2')).fontSize, '18px');
+    eq('题库标题字重 600', getComputedStyle(card.querySelector('.h2')).fontWeight, '600');
+    ok('标题层级拉得开：H1 至少是卡片标题的 2 倍',
+      parseFloat(h1cs.fontSize) / parseFloat(getComputedStyle(card.querySelector('.h2')).fontSize) >= 2,
+      h1cs.fontSize + ' vs ' + getComputedStyle(card.querySelector('.h2')).fontSize);
+
+    // 三入口：同一行、高 32、间距 8、胶囊、图标 14px
+    var rows = qa('.bank-actions');
+    eq('每个题库都有一行入口', rows.length, 2);
+    // 两个题库各一行入口，本段只看第一行（Java）的三个按钮
+    var btns = Array.prototype.slice.call(rows[0].querySelectorAll('.btn--mini'));
+    eq('一行三个入口', btns.length, 3);
+    var oneRow = btns.every(function (b) {
+      return Math.abs(b.getBoundingClientRect().top - btns[0].getBoundingClientRect().top) < 1;
+    });
+    ok('三个入口在同一行', oneRow,
+      btns.map(function (b) { return Math.round(b.getBoundingClientRect().top); }).join(','));
+    ok('入口高度 32px', Math.abs(btns[0].getBoundingClientRect().height - 32) < 0.6,
+      'h=' + btns[0].getBoundingClientRect().height);
+    var g = btns[1].getBoundingClientRect().left - btns[0].getBoundingClientRect().right;
+    ok('入口间距 8px', Math.abs(g - 8) < 0.6, 'gap=' + g.toFixed(1));
+    ok('入口是胶囊圆角', parseFloat(getComputedStyle(btns[0]).borderRadius) >= 32,
+      getComputedStyle(btns[0]).borderRadius);
+    ok('入口字号 12.5px（窄屏 12px）',
+      getComputedStyle(btns[0]).fontSize === (narrow ? '12px' : '12.5px'),
+      getComputedStyle(btns[0]).fontSize);
+    eq('三个入口各带一个内联 SVG 图标', rows[0].querySelectorAll('svg.mini-ico').length, 3);
+    var iconBox = rows[0].querySelector('svg.mini-ico').getBoundingClientRect();
+    ok('图标 14px', Math.abs(iconBox.width - 14) < 0.6 && Math.abs(iconBox.height - 14) < 0.6,
+      iconBox.width.toFixed(1) + 'x' + iconBox.height.toFixed(1));
+    ok('图标用 currentColor 描边',
+      getComputedStyle(rows[0].querySelector('svg.mini-ico circle, svg.mini-ico path'))
+        .stroke === getComputedStyle(btns[0]).color);
+
+    // 375px 预算：无头窗口有最小宽度，量不了真视口（真 375px 的排版由
+    // e2e-narrow.html 与截图验收覆盖）。这里把这一行的可用宽临时压到
+    // 375 − 2×16 = 343px（手机 --pad-page），断言它绝不横向溢出 —— 放不下就换行。
+    // 注：手机断点会把 .btn--mini 字号降到 12px，所以真机上三个入口是一行。
+    var savedW = rows[0].style.width;
+    rows[0].style.width = '343px';
+    var noOverflow = rows[0].scrollWidth <= rows[0].clientWidth + 1;
+    var savedSw = rows[0].scrollWidth, savedCw = rows[0].clientWidth;
+    rows[0].style.width = savedW;
+    ok('375px 内容宽（343px）下入口行不横向溢出', noOverflow,
+      'sw=' + savedSw + ' cw=' + savedCw);
+
+    // 底部两行（反馈箱 / 维护日志）：高 48、左右 14、左图标 18 + 右箭头 18、无外阴影、行间 8
+    var lrows = qa('.list-row');
+    eq('底部两行入口', lrows.length, 2);
+    var lr = lrows[0], lrcs = getComputedStyle(lr);
+    ok('底部行高 48px', Math.abs(lr.getBoundingClientRect().height - 48) < 0.6,
+      'h=' + lr.getBoundingClientRect().height);
+    eq('底部行左右内边距 14px', lrcs.paddingLeft + ' ' + lrcs.paddingRight, '14px 14px');
+    eq('底部行没有外阴影', lrcs.boxShadow, 'none');
+    ok('底部行圆角用 --r-ctl', lrcs.borderTopLeftRadius === appVar('--r-ctl'), lrcs.borderTopLeftRadius);
+    eq('底部行文字 13px', lrcs.fontSize, '13px');
+    var li = lr.querySelector('svg.row-ico').getBoundingClientRect();
+    ok('底部行左图标 18px', Math.abs(li.width - 18) < 0.6 && Math.abs(li.height - 18) < 0.6,
+      li.width + 'x' + li.height);
+    var la = lr.querySelector('svg.row-arrow').getBoundingClientRect();
+    ok('底部行右箭头 18px', Math.abs(la.width - 18) < 0.6 && Math.abs(la.height - 18) < 0.6,
+      la.width + 'x' + la.height);
+    ok('右箭头在右端（距行右缘 14px）',
+      Math.abs(lr.getBoundingClientRect().right - la.right - 14) < 1,
+      'delta=' + (lr.getBoundingClientRect().right - la.right).toFixed(1));
+    ok('左图标与右箭头对称留白（左 14px）',
+      Math.abs(li.left - lr.getBoundingClientRect().left - 14) < 1,
+      'delta=' + (li.left - lr.getBoundingClientRect().left).toFixed(1));
+    ok('底部行之间间距 8px',
+      Math.abs(lrows[1].getBoundingClientRect().top - lrows[0].getBoundingClientRect().bottom - 8) < 0.6,
+      'gap=' + (lrows[1].getBoundingClientRect().top - lrows[0].getBoundingClientRect().bottom).toFixed(1));
+    eq('反馈箱那行保留计数文案', lr.textContent.trim(), window.QuizCopy.FB_BOX_ENTRY(0));
+    eq('第二行是维护日志', lrows[1].textContent.trim(), window.QuizCopy.CHANGELOG_ENTRY);
+    ok('底部行文字左对齐（有伸缩的中间文字块）',
+      getComputedStyle(lr.querySelector('.list-row__label')).flexGrow !== '0',
+      getComputedStyle(lr.querySelector('.list-row__label')).flexGrow);
+
+    // 悬停：底色 --bg-2、文字 --ink、箭头 --ink-2；位置尺寸不动、不加 transform
+    noTransitions();
+    var lrh = hoverMeasure(lr);
+    eq('底部行悬停底色变 --bg-2', lrh.after.bg, appVar('--bg-2'));
+    ok('底部行悬停文字变 --ink', lrh.after.color === appVar('--ink'),
+      lrh.before.color + ' → ' + lrh.after.color);
+    ok('底部行悬停箭头变 --ink-2',
+      hoverArrowColor(lr) === appVar('--ink-2'), hoverArrowColor(lr));
+    eq('底部行悬停不位移', lrh.after.rect, lrh.before.rect);
+    eq('底部行悬停不加 transform', lrh.after.transform, 'none');
+    eq('底部行默认无底色', lrh.before.bg, 'rgba(0, 0, 0, 0)');
+    restoreTransitions();
+
+    // 页脚：上间距 32、12px --ink-3、1px 分隔线 60% 不透明度
+    var foot = q('.page-foot');
+    ok('页脚上间距 32px', Math.abs(parseFloat(getComputedStyle(foot).marginTop) - 32) < 0.6,
+      'margin-top=' + getComputedStyle(foot).marginTop);
+    var ftxt = q('.page-foot__text');
+    eq('页脚文字 12px', getComputedStyle(ftxt).fontSize, '12px');
+    ok('页脚文字用 --ink-3', getComputedStyle(ftxt).color === appVar('--ink-3'), getComputedStyle(ftxt).color);
+    eq('页脚文案', ftxt.textContent.trim(), '数据只存在本机 · Recall');
+    var line = getComputedStyle(foot, '::before');
+    ok('页脚有 1px 分隔线', Math.abs(parseFloat(line.height) - 1) < 0.2, 'height=' + line.height);
+    ok('分隔线压到 60% 不透明度', Math.abs(parseFloat(line.opacity) - 0.6) < 0.02, 'opacity=' + line.opacity);
+    eq('页脚不可选中', getComputedStyle(foot).userSelect, 'none');
+    eq('页脚鼠标不是文本光标', getComputedStyle(foot).cursor, 'default');
+
+    ok('首页无横向滚动', docEl.scrollWidth <= docEl.clientWidth + 1,
+      'sw=' + docEl.scrollWidth + ' cw=' + docEl.clientWidth);
+  }
+
+  /** 宽屏（≥1024px）首页：容器 960、双栏卡片、Hero 左右分布。
+      窄窗口（无头 Chrome 默认 1440 之外的情况）走另一套断言：单列 + 760 容器。
+      临时改 `--content-w` 之类的做法行不通 —— 这里直接量当前视口下的真实排版。 */
+  function wideChecks() {
+    log('--- 首页宽屏（≥1024px 双栏 / 以下单列）---');
+    var docEl = document.documentElement;
+    var wide = window.innerWidth >= 1024;
+    var page = q('.page--list');
+    var pageR = page.getBoundingClientRect();
+    var cards = qa('[data-bank]');
+    var r0 = cards[0].getBoundingClientRect();
+    var r1 = cards[1].getBoundingClientRect();
+    var heroEl = q('.hero');
+    var titleR = q('.hero__title').getBoundingClientRect();
+    var pillsR = q('.hero__pills').getBoundingClientRect();
+    var note = q('.bank-note');
+    var actions = q('.bank-actions');
+    var btnsArr = Array.prototype.slice.call(actions.querySelectorAll('.btn--mini'));
+
+    /* 两种宽度下断言「条数」必须一致：README 里记的是唯一一个数字，
+       如果宽/窄分支条数不同，换台机器跑出来的数就对不上了。
+       所以这里每条断言都同时跑，只是期望值按断点取。 */
+    ok('首页根节点带 page--wide', page.classList.contains('page--wide'), page.className);
+    eq('page--wide 只出现在首页（列表页只有一处）', qa('.page--wide').length, 1);
+    ok('宽屏容器 960 / 窄屏不超过视口',
+      wide ? Math.abs(pageR.width - 960) < 1 : pageR.width <= docEl.clientWidth + 1,
+      'w=' + pageR.width.toFixed(1) + ' vw=' + docEl.clientWidth);
+    ok('容器水平居中',
+      Math.abs(pageR.left - (docEl.clientWidth - pageR.width) / 2) < 1.5,
+      'left=' + pageR.left.toFixed(1));
+    // 同一行 / 上下排
+    ok(wide ? '宽屏两卡在同一行' : '窄屏两卡上下排（不同行）',
+      wide ? Math.abs(r0.top - r1.top) < 0.6 : Math.abs(r0.top - r1.top) > 1,
+      'top=' + r0.top.toFixed(1) + '/' + r1.top.toFixed(1));
+    ok(wide ? '宽屏卡片宽 ≥430px' : '窄屏卡片不超过容器宽',
+      wide ? r0.width >= 430 && r1.width >= 430 : r0.width <= pageR.width + 0.5,
+      r0.width.toFixed(1) + ' / ' + r1.width.toFixed(1));
+    ok(wide ? '宽屏第二张在第一张右边' : '窄屏第二张在第一张下边',
+      wide ? r1.left > r0.right : r1.top > r0.bottom,
+      'r1.left=' + r1.left.toFixed(1) + ' r0.right=' + r0.right.toFixed(1) +
+      ' r1.top=' + r1.top.toFixed(1));
+    ok(wide ? '宽屏两栏间隙 20px' : '窄屏两张卡片间距 ≥14px',
+      wide ? Math.abs(r1.left - r0.right - 20) < 1.2 : (r1.top - r0.bottom) >= 14,
+      wide ? 'gap=' + (r1.left - r0.right).toFixed(1) : 'gap=' + (r1.top - r0.bottom).toFixed(1));
+    ok('一行三入口不换行（两种宽度都要）',
+      btnsArr.length === 3 && btnsArr.every(function (b) {
+        return Math.abs(b.getBoundingClientRect().top - btnsArr[0].getBoundingClientRect().top) < 1;
+      }),
+      btnsArr.map(function (b) { return Math.round(b.getBoundingClientRect().top); }).join(','));
+    ok('三入口不溢出所在列', actions.scrollWidth <= actions.clientWidth + 1,
+      'sw=' + actions.scrollWidth + ' cw=' + actions.clientWidth);
+    ok(wide ? '宽屏双栏隐藏「还没有错题」小字' : '窄屏保留「还没有错题」小字',
+      !note || (wide ? getComputedStyle(note).display === 'none'
+        : getComputedStyle(note).display !== 'none'),
+      note ? getComputedStyle(note).display : '没有 note 元素');
+    eq(wide ? '宽屏 Hero 是 flex 横排' : '窄屏 Hero 是上下排',
+      getComputedStyle(heroEl).display, wide ? 'flex' : 'block');
+    ok(wide ? '宽屏胶囊在标题右边' : '窄屏胶囊在标题下边',
+      wide ? pillsR.left > titleR.right : pillsR.top > titleR.bottom,
+      'pills.left=' + pillsR.left.toFixed(1) + ' title.right=' + titleR.right.toFixed(1));
+    // 容器有左右内边距（--pad-page），对齐要比「内容边缘」而不是边框边缘
+    var pagePad = parseFloat(getComputedStyle(page).paddingRight);
+    var contentRight = pageR.right - pagePad;
+    var contentLeft = pageR.left + pagePad;
+    ok(wide ? '宽屏胶囊右端贴容器内容右缘' : '窄屏胶囊左端贴容器内容左缘',
+      wide ? Math.abs(pillsR.right - contentRight) < 1.5 : Math.abs(pillsR.left - contentLeft) < 1.5,
+      'pills.right=' + pillsR.right.toFixed(1) + ' content.right=' + contentRight.toFixed(1) +
+      ' pad=' + pagePad);
+    ok('首页无横向滚动', docEl.scrollWidth <= docEl.clientWidth + 1,
+      'sw=' + docEl.scrollWidth + ' cw=' + docEl.clientWidth);
+  }
+
+  /** 顶栏必须和内容左右对齐：宽屏首页 960（站名贴 H1、主题按钮贴卡片右缘），
+      其余视图 760，与各自内容对齐。量「内容边缘」= 容器外框 ∓ 内边距。 */
+  function topbarAlign(withTitle) {
+    log('--- 顶栏与内容对齐 ---');
+    var inner = q('.topbar__inner');
+    var page = q('.page');
+    var pageR = page.getBoundingClientRect();
+    var innerR = inner.getBoundingClientRect();
+    var pad = parseFloat(getComputedStyle(page).paddingRight);
+    var contentLeft = pageR.left + pad;
+    var contentRight = pageR.right - pad;
+    var themeR = q('#btnTheme').getBoundingClientRect();
+    eq('顶栏与内容同宽（' + Math.round(pageR.width) + 'px）', Math.round(innerR.width), Math.round(pageR.width));
+    ok('顶栏与内容同一条左边线', Math.abs(innerR.left - pageR.left) < 1,
+      'inner.left=' + innerR.left.toFixed(1) + ' page.left=' + pageR.left.toFixed(1));
+    ok('主题按钮与内容右缘对齐', Math.abs(themeR.right - contentRight) < 1,
+      'btn.right=' + themeR.right.toFixed(1) + ' content.right=' + contentRight.toFixed(1));
+    if (withTitle) {
+      // 列表页没有「返回」，站名就是最左那个
+      var brandR = q('.brand').getBoundingClientRect();
+      ok('站名铭牌与内容左缘对齐', Math.abs(brandR.left - contentLeft) < 1,
+        'brand.left=' + brandR.left.toFixed(1) + ' content.left=' + contentLeft.toFixed(1));
+      var h1R = q('.hero__title').getBoundingClientRect();
+      ok('站名铭牌与 H1 左缘对齐（相差 ≤1px）', Math.abs(brandR.left - h1R.left) < 1,
+        'brand.left=' + brandR.left.toFixed(1) + ' h1.left=' + h1R.left.toFixed(1));
+      // 双栏时取最靠右那张卡（第一张的右缘在页面中间）
+      var cardsArr = qa('[data-bank]');
+      var cardRight = Math.max.apply(null, cardsArr.map(function (c) { return c.getBoundingClientRect().right; }));
+      ok('主题按钮与卡片右缘对齐（相差 ≤1px）', Math.abs(themeR.right - cardRight) < 1,
+        'btn.right=' + themeR.right.toFixed(1) + ' card.right=' + cardRight.toFixed(1));
+    } else {
+      // 其它视图最左是「返回」，它才是贴内容左缘的那个
+      var backR = q('#btnBack').getBoundingClientRect();
+      ok('返回按钮与内容左缘对齐', Math.abs(backR.left - contentLeft) < 1,
+        'back.left=' + backR.left.toFixed(1) + ' content.left=' + contentLeft.toFixed(1));
+    }
+    ok('对齐后页面无横向滚动', document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      'sw=' + document.documentElement.scrollWidth + ' cw=' + document.documentElement.clientWidth);
+  }
+
+  /** 读 :root 上的设计令牌（用来断言「用的是变量」而不是写死颜色）。
+      令牌是十六进制，computedStyle 给的是 rgb()，这里统一转成 rgb() 再比。 */
+  function appVar(name) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    var m = /^#([0-9a-f]{6})$/i.exec(v);
+    if (!m) return v;
+    var n = parseInt(m[1], 16);
+    return 'rgb(' + ((n >> 16) & 255) + ', ' + ((n >> 8) & 255) + ', ' + (n & 255) + ')';
+  }
+
+  function appInk2() {
+    return appVar('--ink-2');
+  }
+
+  /* 底部行的箭头颜色：悬停规则的箭头是后代选择器，只能临时加类量一次 */
+  function hoverArrowColor(row) {
+    row.classList.add('state-hover');
+    var c = getComputedStyle(row.querySelector('.row-arrow')).color;
+    row.classList.remove('state-hover');
+    return c;
+  }
+
+  /* ================= 主流程 ================= */
+  function runFlow() {
+    log('--- 题库列表 ---');
+    var cards = qa('[data-bank]');
+    eq('列表页有 2 个题库', cards.length, 2);
+    ok('列表页显示 Java 题库', appText().indexOf('Java程序设计题库') >= 0);
+    ok('列表页显示 Web 题库', appText().indexOf('Web前端题库') >= 0);
+    ok('列表页标题正确', text('.h1') === window.QuizCopy.LIST_TITLE);
+
+    // 卡片排版：标题一行、题数一行（曾经用 .stack 的 margin-top 给行内 span「假装有间距」）
+    (function () {
+      var body = q('[data-bank="java"] .stack');
+      if (!body) { ok('卡片：找到文字区', false); return; }
+      var t = body.children[0];
+      var m = body.children[1];
+      var badge = q('[data-bank="java"] .badge');
+      var rt = t.getBoundingClientRect();
+      var rm = m.getBoundingClientRect();
+      ok('卡片：题数那行在标题下方（meta.top ≥ title.bottom）', rm.top >= rt.bottom - 0.5,
+        'title.bottom=' + rt.bottom.toFixed(1) + ' meta.top=' + rm.top.toFixed(1));
+      ok('卡片：两行之间真有间隙（≥2px）', rm.top - rt.bottom >= 2, 'gap=' + (rm.top - rt.bottom).toFixed(1));
+      eq('卡片：文字区是竖排 flex', getComputedStyle(body).flexDirection, 'column');
+      eq('卡片：标题单行不换行', getComputedStyle(t).whiteSpace, 'nowrap');
+      ok('卡片：标题不撑破文字区（省略号生效）', rt.width <= body.getBoundingClientRect().width + 0.5,
+        'title=' + rt.width.toFixed(1) + ' body=' + body.getBoundingClientRect().width.toFixed(1));
+      ok('卡片：标题与右侧徽标不重叠', rt.right <= badge.getBoundingClientRect().left,
+        'title.right=' + rt.right.toFixed(1) + ' badge.left=' + badge.getBoundingClientRect().left.toFixed(1));
+    })();
+    ok('列表页不显示交卷按钮', !visible(q('#btnFinish')),
+      'hidden=' + q('#btnFinish').hidden + ' display=' + getComputedStyle(q('#btnFinish')).display);
+
+    log('--- 顶栏：站名铭牌 + 夜间按钮 ---');
+    (function () {
+      var brandBox = cssProp('.brand', 'boxShadow');
+      ok('站名是凹陷铭牌（box-shadow 含 inset）', /inset/.test(brandBox), brandBox);
+      ok('站名不可点（没有 cursor:pointer）', cssProp('.brand', 'cursor') !== 'pointer',
+        'cursor=' + cssProp('.brand', 'cursor'));
+      ok('品牌圆点用强调色', cssProp('.brand__dot', 'backgroundColor') === 'rgb(109, 93, 252)',
+        'dot=' + cssProp('.brand__dot', 'backgroundColor'));
+      var themeBox = cssProp('#btnTheme', 'boxShadow');
+      ok('夜间按钮是凸起按钮（不含 inset，也不是 none）',
+        themeBox !== 'none' && themeBox.indexOf('inset') < 0, themeBox);
+      ok('375px 顶栏放得下（scrollWidth <= clientWidth）', topbarFitsAt(375));
+    })();
+
+    // 间距按「阴影占位」：卡片自带 8px 外阴影，间距太小会视觉上贴在一起
+    (function () {
+      var c1r = qa('[data-bank]')[0].getBoundingClientRect();
+      var c2r = qa('[data-bank]')[1].getBoundingClientRect();
+      var wide = window.innerWidth >= 1024;
+      if (wide) {
+        // ≥1024px：两栏并排，比的是左右间隙（20px）而不是上下
+        var hgap = c2r.left - c1r.right;
+        ok('列表页：两栏卡片左右间隙 ≥ 14px', hgap >= 14, 'hgap=' + hgap.toFixed(1));
+      } else {
+        var gap = c2r.top - c1r.bottom;
+        ok('列表页：两张卡片之间的间距 ≥ 14px', gap >= 14, 'gap=' + gap.toFixed(1));
+      }
+      var hint = q('.page-head p').getBoundingClientRect();
+      var lead = qa('[data-bank]')[0].getBoundingClientRect().top - hint.bottom;
+      // 说明行到首卡的间距按断点不同（桌面 28px / 手机 20px），这里各用各的下限，
+      // 免得在窄窗口里跑这套断言时被误判为 FAIL。
+      var leadFloor = window.innerWidth < 768 ? 18 : 24;
+      ok('列表页：说明行与第一张卡片之间 ≥ 24px', lead >= leadFloor,
+        'lead=' + lead.toFixed(1) + ' floor=' + leadFloor + ' vw=' + window.innerWidth);
+    })();
+
+    wideChecks();
+
+    topbarAlign(true);
+
+    homeChecks();
+
+    visualChecks();
+
+    log('--- 进入 Java 答题页 ---');
+    openBank('java');
+    ok('进入答题页', currentIndex() === 1, meta());
+    ok('顶部标题是题库名', text('#topTitle') === 'Java程序设计题库');
+    ok('答题页显示交卷按钮', visible(q('#btnFinish')));
+
+    // 答题页顶栏不跟着放宽：1280px 下仍是 760，与题卡左右对齐
+    topbarAlign(false);
+    eq('第 1 题有 4 个选项', qa('[data-opt]').length, 4);
+    ok('题干非空', q('.rich').textContent.trim().length > 0);
+
+    // 反向：真正有信息量的文字仍然可选（Hero 的 user-select:none 不许漏到内容上）
+    eq('题干仍可选中', getComputedStyle(q('.rich')).userSelect, 'text');
+    eq('选项文字仍可选中', getComputedStyle(q('[data-opt] .opt__body')).userSelect, 'text');
+    ok('答题页没有被首页的不可选中规则漏到',
+      getComputedStyle(q('.page')).userSelect !== 'none',
+      getComputedStyle(q('.page')).userSelect);
+
+    overflowChecks();
+
+    log('--- 首题边界 ---');
+    ok('第 1 题「上一题」禁用', q('[data-act="prev"]').disabled === true);
+    ok('第 1 题「下一题」可用', q('[data-act="next"]').disabled === false);
+    click(q('[data-act="prev"]'));
+    eq('第 1 题点上一题不越界', currentIndex(), 1);
+
+    log('--- 选答案 + 提交 ---');
+    click(q('[data-opt="B"]'));
+    ok('选项选中态出现', !!q('.opt--selected'));
+    eq('选中后未计入已答对', correctCount(), 0);
+    visualChecksSelected();
+
+    click(q('[data-act="submit"]'));
+    ok('提交后出现答对提示', !!q('.tip--ok'), q('.tip') ? q('.tip').textContent : '无 tip');
+    eq('已答对 = 1', correctCount(), 1);
+    ok('正确项有 ✓ 标签', !!q('.opt--correct .opt__tag'));
+    ok('提交后选项被锁定', q('[data-opt="B"]').disabled === true);
+    ok('解析区出现', !!q('.explain'));
+    eq('解析文字仍可选中', getComputedStyle(q('.explain__label')).userSelect, 'text');
+    eq('答题页整页显式可选', getComputedStyle(q('.page--quiz')).userSelect, 'text');
+
+    log('--- 提交后按钮「已提交 + 禁用」---');
+    eq('提交后按钮文案是「已提交」', text('[data-act="submit"]'), window.QuizCopy.BTN_SUBMITTED);
+    ok('提交后按钮被禁用', q('[data-act="submit"]').disabled === true);
+    eq('提交后按钮 aria-disabled=true', q('[data-act="submit"]').getAttribute('aria-disabled'), 'true');
+    click(q('[data-act="submit"]'));
+    eq('再点禁用按钮没有任何变化（已答对仍 1）', correctCount(), 1);
+    ok('「已提交」按钮熄掉强调色（回到中性底）',
+      cssProp('[data-act="submit"]', 'backgroundColor') !== 'rgb(109, 93, 252)',
+      'bg=' + cssProp('[data-act="submit"]', 'backgroundColor'));
+
+    log('--- 幂等仍在 session 层（连续判定 5 次）---');
+    var beforeCorrect = window.QuizApp.session().stats().correct;
+    var beforeSubmitted = window.QuizApp.session().stats().submitted;
+    for (var i = 0; i < 5; i++) {
+      window.QuizApp.session().submit();
+      window.QuizApp.session().evaluate(window.QuizApp.session().question.id);
+    }
+    eq('连续 5 次判定后 correct 不变', window.QuizApp.session().stats().correct, beforeCorrect);
+    eq('连续 5 次判定后 submitted 不变', window.QuizApp.session().stats().submitted, beforeSubmitted);
+    eq('连续 5 次判定后已答对仍为 1', correctCount(), 1);
+    ok('连续 5 次判定后仍是答对提示', !!q('.tip--ok'));
+
+    log('--- 上下题 ---');
+    click(q('[data-act="next"]'));
+    eq('下一题 → 第 2 题', currentIndex(), 2);
+    ok('第 2 题「上一题」可用', q('[data-act="prev"]').disabled === false);
+    click(q('[data-act="prev"]'));
+    eq('上一题 → 第 1 题', currentIndex(), 1);
+    eq('回到第 1 题仍是已答对 1', correctCount(), 1);
+    ok('回到第 1 题仍显示判定结果', !!q('.tip--ok'));
+    // 状态从本轮记录派生：切走再回来，按钮仍必须是「已提交」+ 禁用
+    eq('切走再回来按钮仍是「已提交」', text('[data-act="submit"]'), window.QuizCopy.BTN_SUBMITTED);
+    ok('切走再回来按钮仍然禁用', q('[data-act="submit"]').disabled === true);
+
+    log('--- 未选答案时不能提交 ---');
+    click(q('[data-act="next"]'));
+    eq('当前第 2 题', currentIndex(), 2);
+    ok('未选时提交按钮禁用', q('[data-act="submit"]').disabled === true);
+
+    log('--- 答错一题 ---');
+    var q2 = q('.rich').textContent;
+    // 找一个不是正确答案的选项
+    var opts = qa('[data-opt]');
+    click(opts[0]);
+    click(q('[data-act="submit"]'));
+    var isBad = !!q('.tip--bad');
+    if (isBad) {
+      eq('答错后已答对仍为 1', correctCount(), 1);
+      ok('答错提示含「正确答案是」', q('.tip--bad').textContent.indexOf('正确答案是') >= 0);
+      ok('错选项有 ✕ 标签', !!q('.opt--wrong .opt__tag'));
+    } else {
+      ok('第 2 题选了正确答案（跳过答错断言）', true);
+    }
+
+    log('--- 跳到最后一题 ---');
+    goTo(219);
+    eq('到达第 219 题', currentIndex(), 219);
+    ok('最后一题「下一题」变成「交卷」', !!q('[data-act="finish"]') && !q('[data-act="next"]'));
+    ok('最后一题仍有「上一题」', q('[data-act="prev"]').disabled === false);
+
+    log('--- Java #219 材料题渲染 ---');
+    var pre = q('.rich pre');
+    ok('#219 题干有代码块', !!pre, '未找到 pre');
+    if (pre) {
+      ok('#219 代码块保留缩进', pre.textContent.indexOf('    private Map') >= 0, pre.textContent.slice(0, 80));
+      ok('#219 代码块保留空行', pre.textContent.indexOf('\n\n') >= 0);
+    }
+    var rich = q('.rich');
+    ok('#219 题干有多个段落', rich.querySelectorAll('p').length >= 6, 'p=' + rich.querySelectorAll('p').length);
+    ok('#219 题干有列表', rich.querySelectorAll('ul,ol').length >= 1);
+    ok('#219 题干很长', rich.textContent.length > 1500, 'len=' + rich.textContent.length);
+
+    log('--- 提前交卷确认 ---');
+    click(q('#btnFinish'));
+    ok('出现确认弹窗', !!q('.modal'), '无弹窗');
+    var modalText = q('.modal') ? q('.modal').textContent : '';
+    ok('弹窗提示还有未做的题', /还有 \d+ 题没做，确定交卷？/.test(modalText), modalText);
+    click(q('[data-modal-close]'));
+    ok('取消后弹窗关闭', !q('.modal'));
+    ok('取消后仍在答题页', currentIndex() === 219);
+
+    log('--- 交卷 → 结果页 ---');
+    click(q('#btnFinish'));
+    click(q('[data-modal-confirm]'));
+    ok('进入结果页', text('.h1') === '答题结果', text('.h1'));
+    ok('结果页不显示交卷按钮', !visible(q('#btnFinish')),
+      'display=' + getComputedStyle(q('#btnFinish')).display);
+    eq('结果页整页文字显式可选', getComputedStyle(q('.page--result')).userSelect, 'text');
+    eq('结果页错题行仍可选中', getComputedStyle(q('.row__main')).userSelect, 'text');
+
+    var stats = statValues();
+    eq('结果页三个关键数字', stats.length, 3);
+    eq('答对数 = 1', stats[0], '1');
+    ok('结果页写明参与判分题数', /参与判分 219 题/.test(appText()),
+      appText().slice(0, 200));
+    ok('结果页写明未作答题数', /未作答 \d+ 题/.test(appText()));
+    ok('结果页有错题/未作答分区', appText().indexOf('错题') >= 0 && appText().indexOf('未作答') >= 0);
+
+    log('--- 复制成绩 ---');
+    var copyBtn = q('[data-act="copy-result"]');
+    ok('结果页有「复制成绩」按钮', !!copyBtn);
+    ok('「复制成绩」是次要按钮（不是主按钮）',
+      !!copyBtn && !copyBtn.classList.contains('btn--primary'), copyBtn ? copyBtn.className : '无');
+    if (copyBtn) {
+      click(copyBtn);
+      eq('点击后按钮变成「已复制」', text('[data-act="copy-result"]'), window.QuizCopy.RESULT_COPIED);
+      var scoreText = window.QuizApp.feedback().lastCopied;
+      ok('复制文本第 1 行带题库名与范围',
+        scoreText.indexOf('我在《Java程序设计题库》做完一轮「全部 219 题」：') === 0, scoreText);
+      ok('复制文本第 2 行有得分/正确率/用时',
+        /^答对 1 \/ 219，正确率 \d+%，用时 \d\d:\d\d。$/.test(scoreText.split('\n')[1]), scoreText);
+      ok('复制文本第 3 行是站点名 + 完成时间',
+        /^—— .+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(scoreText.split('\n')[2]), scoreText);
+      eq('复制文本共 3 行', scoreText.split('\n').length, 3);
+    }
+
+    log('--- 结果页跳题 ---');
+    var jump = q('[data-goto]');
+    ok('结果页有跳题按钮', !!jump);
+    if (jump) {
+      click(jump);
+      ok('跳题回到答题页', currentIndex() > 0, meta());
+      ok('跳题后显示该题判定', !!q('.tip--bad') || !!q('.tip--ok'));
+    }
+  }
+
+  /* ================= Web 题库专项 ================= */
+  function runWebChecks() {
+    log('--- 返回列表 → Web 题库 ---');
+    // 从结果页返回
+    var back = q('[data-act="back"]');
+    if (back) click(back);
+    else { click(q('#btnFinish')); click(q('[data-modal-confirm]')); click(q('[data-act="back"]')); }
+
+    ok('回到列表页', text('.h1') === window.QuizCopy.LIST_TITLE);
+    openBank('web');
+    eq('Web 题库第 1 题', currentIndex(), 1);
+
+    log('--- Web #31 数据异常题 ---');
+    goTo(31);
+    eq('到达第 31 题', currentIndex(), 31);
+    ok('异常题无选项可点', qa('[data-opt]').length === 0, 'got ' + qa('[data-opt]').length);
+    ok('异常题显示提示', appText().indexOf('本题数据异常，不计入判分') >= 0);
+    ok('异常题显示数据异常徽标', appText().indexOf('数据异常') >= 0);
+    ok('异常题提交按钮禁用', q('[data-act="submit"]').disabled === true);
+    eq('异常题提交按钮文案是「本题不计分」', text('[data-act="submit"]'), window.QuizCopy.BTN_INVALID);
+    ok('异常题题干仍显示', q('.rich').textContent.indexOf('外边距') >= 0);
+    ok('异常题解析仍显示', appText().indexOf('margin') >= 0);
+
+    log('--- Web #120 五选项 ---');
+    goTo(120);
+    eq('到达第 120 题', currentIndex(), 120);
+    eq('第 120 题有 5 个选项', qa('[data-opt]').length, 5);
+    var keys = qa('.opt__key').map(function (e) { return e.textContent.trim(); });
+    eq('选项字母是 A-E', keys, ['A', 'B', 'C', 'D', 'E']);
+    ok('第 120 题题干有代码块', !!q('.rich pre'));
+
+    log('--- Web 最后一题交卷 ---');
+    ok('最后一题显示交卷', !!q('[data-act="finish"]'));
+    click(q('#btnFinish'));
+    click(q('[data-modal-confirm]'));
+    ok('Web 结果页', text('.h1') === '答题结果');
+    ok('Web 结果页写明 119 题参与判分', /参与判分 119 题（另有 1 题数据异常未计入）/.test(appText()),
+      appText().slice(0, 260));
+  }
+
+  /* ================= 刷新恢复 ================= */
+  function runRefreshWrite() {
+    log('--- 刷新恢复：准备数据（全新 profile）---');
+    ok('localStorage 在 file:// 下可用', (function () {
+      try { localStorage.setItem('__probe', '1'); localStorage.removeItem('__probe'); return true; }
+      catch (e) { return false; }
+    })());
+
+    eq('干净环境：初始在列表页', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    openBank('java');
+    // 第 1 题答对
+    click(q('[data-opt="B"]'));
+    click(q('[data-act="submit"]'));
+    eq('写入：第 1 题已答对', correctCount(), 1);
+    // 第 2 题：选而不交
+    click(q('[data-act="next"]'));
+    click(q('[data-opt="A"]'));
+    ok('写入：第 2 题已选未提交', !!q('.opt--selected'));
+    // 第 3 题：什么都不做
+    click(q('[data-act="next"]'));
+    eq('写入：停在第 3 题', currentIndex(), 3);
+
+    var appRaw = localStorage.getItem('quiz:app');
+    var progRaw = localStorage.getItem('quiz:progress:java');
+    ok('已保存当前题库与视图', !!appRaw && appRaw.indexOf('quiz') >= 0, String(appRaw));
+    ok('已保存答题进度', !!progRaw && progRaw.indexOf('answers') >= 0);
+  }
+
+  function runRefreshCheck() {
+    log('--- 刷新恢复：验证 ---');
+    eq('刷新后仍在答题页', !!q('.meta'), true);
+    eq('刷新后停在第 3 题', currentIndex(), 3);
+    eq('刷新后第 1 题的答对数保留', correctCount(), 1);
+    eq('刷新后顶部标题是 Java', text('#topTitle') === 'Java程序设计题库' ? 'Java程序设计题库' : text('#topTitle'), 'Java程序设计题库');
+
+    // 回到第 2 题看「选而未交」是否保留
+    click(q('[data-act="prev"]'));
+    eq('回到第 2 题', currentIndex(), 2);
+    ok('「选而未交」的选择被保留', !!q('.opt--selected'), '未找到选中态');
+    ok('「选而未交」不算已作答', !!q('.tip') === false);
+    eq('已答对数仍为 1', correctCount(), 1);
+
+    // 第 1 题判定结果仍在
+    click(q('[data-act="prev"]'));
+    eq('回到第 1 题', currentIndex(), 1);
+    ok('第 1 题判定结果被保留', !!q('.tip--ok'));
+    eq('第 1 题仍计为答对', correctCount(), 1);
+  }
+
+  /* ================= 题型徽标：元素存在还不够，文字必须正确 ================= */
+  var TYPE_CN = { single: '单选题', multiple: '多选题', judge: '判断题' };
+  var TYPE_ALL = ['single', 'multiple', 'judge'];
+
+  // 任何位置（答题页 / 结果页）都回到题库列表
+  function backToList() {
+    if (q('[data-act="back"]')) { click(q('[data-act="back"]')); return; }
+    click(q('#btnFinish'));
+    if (q('[data-modal-confirm]')) click(q('[data-modal-confirm]'));
+    if (q('[data-act="back"]')) click(q('[data-act="back"]'));
+  }
+
+  // 逐题走完整套题库，读每一题卡片上的题型徽标
+  function sweepBadges(bankKey, data) {
+    openBank(bankKey);
+    ok(bankKey + '：已打开答题页', !!q('.chips'), '找不到 .chips');
+    goBack(1);
+
+    var bad = [];
+    var textCount = {};
+    var typeOk = {};
+    for (var i = 0; i < data.questions.length; i++) {
+      var type = data.questions[i].type;
+      var want = TYPE_CN[type] || '（未知题型 ' + type + '）';
+      var got = typeBadgeText();
+      textCount[got] = (textCount[got] || 0) + 1;
+      if (got === want) typeOk[type] = (typeOk[type] || 0) + 1;
+      else bad.push('第 ' + (i + 1) + ' 题期望「' + want + '」，实际「' + got + '」');
+      var next = q('[data-act="next"]');
+      if (next) click(next);
+    }
+    return { bad: bad, textCount: textCount, typeOk: typeOk };
+  }
+
+  function runTypeBadgeChecks() {
+    log('--- 题型徽标（全量扫描） ---');
+    [['java', window.JAVA_BANK], ['web', window.WEB_BANK]].forEach(function (pair) {
+      backToList();
+      var r = sweepBadges(pair[0], pair[1]);
+      var label = pair[1].title + ' 题型徽标';
+      ok(label + '逐题正确（共 ' + pair[1].questions.length + ' 题）', r.bad.length === 0,
+        r.bad.slice(0, 5).join('；') + (r.bad.length > 5 ? ' …共 ' + r.bad.length + ' 处' : ''));
+      ok(label + '文字只出现三种题型名', Object.keys(r.textCount).every(function (t) {
+        return TYPE_ALL.some(function (k) { return TYPE_CN[k] === t; });
+      }), '实际出现：' + Object.keys(r.textCount).map(function (t) {
+        return '「' + t + '」×' + r.textCount[t];
+      }).join('、'));
+      eq(label + '三种题型都出现过', TYPE_ALL.filter(function (k) { return r.typeOk[k] > 0; }), TYPE_ALL);
+    });
+    backToList();
+    eq('扫描结束后回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+  }
+
+  /* ================= 重练：从某一轮的错题派生新的一轮 ================= */
+  var E2E_REPLAY_KEY = 'quiz:e2e:replay';
+
+  function roundsOf(bankKey) {
+    try {
+      var raw = localStorage.getItem('quiz:rounds:' + bankKey);
+      if (!raw) return [];
+      var d = JSON.parse(raw);
+      return (d && d.rounds) || [];
+    } catch (e) { return []; }
+  }
+  function totalCount() {
+    var m = /第 (\d+)\/(\d+) 题/.exec(meta());
+    return m ? Number(m[2]) : -1;
+  }
+  function optionKeys() {
+    return qa('[data-opt]').map(function (e) { return e.getAttribute('data-opt'); });
+  }
+  // 当前题的原始数据（重练轮的题序与原轮不同，必须按题取答案，不能按下标）
+  function currentData() {
+    return window.QuizApp.session().question;
+  }
+  function pickKeys(keys) {
+    keys.forEach(function (k) { click(q('[data-opt="' + k + '"]')); });
+  }
+  function pickCorrect() {
+    // 数据异常题（scorable:false）没有答案：跳过，别让断言自己崩掉
+    var ans = currentData().answer || [];
+    if (!ans.length) return false;
+    pickKeys(ans.slice());
+    return true;
+  }
+  // 往后找一道数据正常的题并选中正确答案（数据异常题直接跳过）。
+  // 随机抽到的 10 题里可能含 answer 为 null 的异常题，那时 pickCorrect 什么都点不了，
+  // 断言会从「1 对」掉成「0 对」——这类地方必须用它而不是裸的 pickCorrect。
+  function pickCorrectSkippingInvalid() {
+    var ans = currentData().answer || [];
+    if (ans.length) { pickCorrect(); return true; }
+    var guard = 0;
+    while (guard++ < 8) {
+      var next = q('[data-act="next"]');
+      if (!next || next.disabled) break;
+      click(next);
+      if ((currentData().answer || []).length) { pickCorrect(); return true; }
+    }
+    return false;
+  }
+  function pickWrong() {
+    var ans = currentData().answer;
+    var keys = optionKeys();
+    for (var i = 0; i < keys.length; i++) {
+      if (ans.indexOf(keys[i]) < 0) { click(q('[data-opt="' + keys[i] + '"]')); return keys[i]; }
+    }
+    return null;
+  }
+  // 往后找一道答得错的正常题并提交（数据异常题直接跳过）
+  function pickWrongSkippingInvalid() {
+    var guard = 0;
+    var key = pickWrong();
+    while (!key && guard++ < 8) {
+      var next = q('[data-act="next"]');
+      if (!next || next.disabled) break;
+      click(next);
+      if (!(currentData().answer || []).length) continue;
+      key = pickWrong();
+    }
+    if (key) submitNow();
+    return key;
+  }
+  function submitNow() { click(q('[data-act="submit"]')); }
+  function finishNow() {
+    click(q('#btnFinish'));
+    if (q('[data-modal-confirm]')) click(q('[data-modal-confirm]'));
+  }
+  // 答对当前题并提交；万一当前是数据异常题（没选项没答案）就往后找一道正常题
+  function answerOne() {
+    var guard = 0;
+    while (guard++ < 8) {
+      var ans = currentData().answer || [];
+      if (ans.length) break;
+      var next = q('[data-act="next"]');
+      if (!next || next.disabled) break;
+      click(next);
+    }
+    pickCorrect();
+    submitNow();
+  }
+
+  // 结果页的三个关键数字：答对数 / 答错数 / 正确率。
+  // 页面结构变了（正确率进了环形、第三格改成「未作答」），这里按语义取值，
+  // 让所有「1 / 3 / 25%」式的断言继续有效。
+  function statValues() {
+    function pick(sel) {
+      var el = q(sel);
+      return el ? el.textContent.trim() : '';
+    }
+    return [
+      pick('[data-stat="correct"] .stat__value'),
+      pick('[data-stat="wrong"] .stat__value'),
+      pick('[data-accuracy]'),
+    ];
+  }
+  function clearNormalProgress(bankKey) {
+    try { localStorage.removeItem('quiz:progress:' + bankKey); } catch (e) {}
+  }
+
+  function runReplayChecks() {
+    var web = window.WEB_BANK;
+    log('--- 重练：先做一轮（1 对 / 3 错 / 1 选而未交 / 其余没碰）---');
+    backToList();
+    eq('重练检查从题库列表开始', text('.h1'), window.QuizCopy.LIST_TITLE);
+    var before = roundsOf('web').length;
+
+    clearNormalProgress('web'); // 从一轮干净的普通练习开始
+    openBank('web');
+    goBack(1);
+    eq('从第 1 题开始', currentIndex(), 1);
+
+    pickCorrect();
+    submitNow();
+    eq('第 1 题答对', correctCount(), 1);
+
+    for (var w = 1; w <= 3; w++) {
+      click(q('[data-act="next"]'));
+      eq('到达第 ' + (w + 1) + ' 题', currentIndex(), w + 1);
+      pickWrong();
+      submitNow();
+      ok('第 ' + (w + 1) + ' 题判错', !!q('.tip--bad'));
+    }
+    eq('三题判错后已答对仍为 1', correctCount(), 1);
+
+    // 第 5 题：选了不提交
+    click(q('[data-act="next"]'));
+    eq('到达第 5 题', currentIndex(), 5);
+    pickWrong();
+    ok('第 5 题只有选中态、没有判定', !!q('.opt--selected') && !q('.tip'));
+    // 第 6 题：什么都不做
+    click(q('[data-act="next"]'));
+    eq('到达第 6 题', currentIndex(), 6);
+
+    var wrongIds = [web.questions[1].id, web.questions[2].id, web.questions[3].id];
+    var pickedOnlyId = web.questions[4].id;
+    var untouchedId = web.questions[5].id;
+    var correctId = web.questions[0].id;
+
+    finishNow();
+    eq('交卷后进入结果页', text('.h1'), '答题结果');
+    eq('结果页统计：答对 1 / 答错 3 / 正确率 25%', statValues(), ['1', '3', '25%']);
+
+    /* ------------- 入口与计数 ------------- */
+    var btn = q('[data-act="replay"]');
+    ok('结果页出现「再练一遍没做对的」', !!btn);
+    eq('按钮计数 = 本轮判错题数 3', btn ? btn.textContent.trim() : '', '再练一遍没做对的（3）');
+    ok('有错题时按钮可点', !!btn && btn.disabled === false);
+    ok('按钮下方有口径小字', appText().indexOf('只练本轮已提交且判错的题') >= 0);
+
+    /* ------------- 交卷即冻结快照 ------------- */
+    var rounds = roundsOf('web');
+    eq('交卷后为 web 追加 1 份轮次快照', rounds.length, before + 1);
+    var snapA = rounds[rounds.length - 1];
+    var rawA = JSON.stringify(snapA);
+    eq('快照记录本轮全部 120 题', snapA.questionIds.length, 120);
+    eq('快照冻结统计 1 / 3', [snapA.stats.correct, snapA.stats.wrong], [1, 3]);
+    ok('快照带 schema / id / finishedAt', snapA.schema === 1 && !!snapA.id && !!snapA.finishedAt);
+    ok('普通轮快照没有来源轮次', snapA.source === null);
+    var liveSnap = window.QuizApp.round();
+    ok('交卷后内存里的快照被冻结', !!liveSnap && Object.isFrozen(liveSnap) &&
+      Object.isFrozen(liveSnap.stats) && Object.isFrozen(liveSnap.questionIds));
+    ok('冻结的快照改不动', (function () {
+      try { liveSnap.stats.correct = 99; } catch (e) {}
+      return liveSnap.stats.correct === 1;
+    })());
+
+    /* ------------- 进入重练轮 ------------- */
+    click(q('[data-act="replay"]'));
+    eq('重练轮只有 3 题', totalCount(), 3);
+    eq('重练轮从第 1 题开始', currentIndex(), 1);
+    var ps = window.QuizApp.session();
+    eq('重练轮题序 = 原轮错题顺序', ps.questionIds, wrongIds);
+    ok('答对的题没进重练轮', ps.questionIds.indexOf(correctId) < 0);
+    ok('选而未提交的题没进重练轮', ps.questionIds.indexOf(pickedOnlyId) < 0);
+    ok('没碰过的题没进重练轮', ps.questionIds.indexOf(untouchedId) < 0);
+    ok('重练轮已答对从 0 开始', correctCount() === 0);
+    ok('答题页顶部标注了在重练哪一轮', appText().indexOf('重练 · 来自') >= 0);
+    ok('标注写明来源轮次错题数', /重练 · 来自 .+ 的那轮（错 3 题）/.test(appText()), text('.chips'));
+    eq('重练轮来源轮次 = 原轮快照 id', ps.source && ps.source.roundId, snapA.id);
+
+    /* ------------- 新轮里 2 对 1 错 ------------- */
+    pickCorrect();
+    submitNow();
+    eq('重练轮第 1 题答对', correctCount(), 1);
+    ok('重练轮提交后按钮变「已提交」并禁用',
+      text('[data-act="submit"]') === window.QuizCopy.BTN_SUBMITTED &&
+      q('[data-act="submit"]').disabled === true);
+    for (var r = 0; r < 4; r++) window.QuizApp.session().submit();
+    eq('重练轮重复判定 4 次后已答对仍为 1', correctCount(), 1);
+    click(q('[data-act="next"]'));
+    pickCorrect();
+    submitNow();
+    eq('重练轮第 2 题答对', correctCount(), 2);
+    click(q('[data-act="next"]'));
+    pickWrong();
+    submitNow();
+    finishNow();
+    eq('重练轮结果页：答对 2 / 答错 1 / 67%', statValues(), ['2', '1', '67%']);
+    eq('重练轮自己也提供重练（可递归）', text('[data-act="replay"]'), '再练一遍没做对的（1）');
+    ok('重练轮结果页也有来源标注', appText().indexOf('重练 · 来自') >= 0);
+
+    /* ------------- 原轮记录原样保留 ------------- */
+    var rounds2 = roundsOf('web');
+    eq('重练轮交卷再多 1 份快照', rounds2.length, before + 2);
+    ok('原轮快照与交卷时逐字节一致', JSON.stringify(rounds2[rounds2.length - 2]) === rawA);
+    eq('原轮快照统计仍是 1 / 3', [rounds2[rounds2.length - 2].stats.correct, rounds2[rounds2.length - 2].stats.wrong], [1, 3]);
+
+    click(q('[data-act="open-source"]'));
+    eq('从重练轮打开原轮结果页', text('.h1'), '答题结果');
+    eq('原轮结果页数字仍是 1 / 3 / 25%', statValues(), ['1', '3', '25%']);
+    ok('原轮结果页仍写 115 题未作答', appText().indexOf('未作答 115 题') >= 0, appText().slice(0, 260));
+    eq('历史记录不提供跳题按钮', qa('[data-goto]').length, 0);
+    ok('历史记录标注为只读', appText().indexOf('这是已完成的一轮记录，只读。') >= 0);
+    var tSnap = appText();
+    var iLab = tSnap.indexOf('重练 · 来自');
+    ok('原轮（普通轮）本身没有重练标识', iLab < 0,
+      iLab < 0 ? '' : ('出现在 ' + iLab + ' 附近：' + tSnap.slice(Math.max(0, iLab - 160), iLab + 80)));
+
+    click(q('[data-act="back"]'));
+    eq('从历史记录返回题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    /* ------------- n = 0：全对的一轮 ------------- */
+    log('--- 全对的一轮：按钮置灰 + 小字说明 ---');
+    clearNormalProgress('web');
+    openBank('web');
+    goBack(1);
+    pickCorrect();
+    submitNow();
+    finishNow();
+    eq('全对一轮统计：1 / 0 / 100%', statValues(), ['1', '0', '100%']);
+
+    var btn0 = q('[data-act="replay"]');
+    ok('n=0 时按钮置灰不可点', !!btn0 && btn0.disabled === true);
+    eq('n=0 时按钮文字仍是（0）', btn0 ? btn0.textContent.trim() : '', '再练一遍没做对的（0）');
+    ok('n=0 时旁边有小字「这一轮没有做错的题」', appText().indexOf('这一轮没有做错的题') >= 0);
+    ok('n=0 时点击按钮不弹窗、不跳转', (function () {
+      click(btn0);
+      return text('.h1') === '答题结果' && !!q('[data-act="replay"]') && !q('.modal');
+    })());
+
+    var rounds3 = roundsOf('web');
+    eq('全对一轮也留下快照', rounds3.length, before + 3);
+    eq('全对一轮快照：答对 1 / 答错 0', [rounds3[rounds3.length - 1].stats.correct, rounds3[rounds3.length - 1].stats.wrong], [1, 0]);
+
+    // 留给 #replay-check：另一次真实页面加载，验证「刷新后仍置灰」
+    try {
+      localStorage.setItem(E2E_REPLAY_KEY, JSON.stringify({
+        bankKey: 'web',
+        roundId: rounds3[rounds3.length - 1].id,
+      }));
+    } catch (e) {}
+  }
+
+  /* 刷新后再看：n=0 那一轮的结果页应当原样恢复，按钮仍然置灰 */
+  function runReplayRefreshCheck() {
+    log('--- 重练：真实刷新后（新一次页面加载，同一 profile）---');
+    var mark = {};
+    try { mark = JSON.parse(localStorage.getItem(E2E_REPLAY_KEY) || '{}') || {}; } catch (e) { mark = {}; }
+    ok('#replay 留下了标记', !!mark.roundId, String(localStorage.getItem(E2E_REPLAY_KEY)));
+
+    eq('刷新后仍停在全对那一轮的结果页', text('.h1'), '答题结果');
+    eq('刷新后统计仍是 1 / 0 / 100%', statValues(), ['1', '0', '100%']);
+    var btn0 = q('[data-act="replay"]');
+    ok('刷新后 n=0 仍然置灰', !!btn0 && btn0.disabled === true);
+    ok('刷新后小字仍在', appText().indexOf('这一轮没有做错的题') >= 0);
+
+    var rounds = roundsOf(mark.bankKey || 'web');
+    var found = rounds.filter(function (x) { return x.id === mark.roundId; })[0];
+    ok('刷新后轮次快照仍在', !!found);
+    eq('快照内容没被刷新改动', found ? [found.stats.correct, found.stats.wrong] : null, [1, 0]);
+
+    // 历史记录入口仍然可读（把这份快照当只读视图打开一遍）
+    var view = window.QuizRound.view(found, window.WEB_BANK);
+    eq('只读视图题数 = 本轮题数', view.questions.length, 120);
+    eq('只读视图统计走快照', [view.stats().correct, view.stats().wrong], [1, 0]);
+    ok('只读视图 pick 不生效', view.pick('A') === false && view.pick('B') === false);
+  }
+
+  /* ================= 练习记录 ================= */
+  function clearQuizStorage() {
+    var keys = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf('quiz:') === 0) keys.push(k);
+    }
+    for (var j = 0; j < keys.length; j++) localStorage.removeItem(keys[j]);
+  }
+
+  function activeRecordRow() {
+    var rows = qa('[data-record]');
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].textContent.indexOf('进行中') >= 0) return rows[i];
+    }
+    return null;
+  }
+
+  function recordsEntry() {
+    return q('[data-records="web"]');
+  }
+
+  function runRecordsChecks() {
+    log('--- 练习记录 ---');
+    clearQuizStorage();
+    if (q('[data-act="back"]')) click(q('[data-act="back"]'));
+    eq('练习记录：从列表页开始', text('.h1'), window.QuizCopy.LIST_TITLE);
+    // 三个入口（练习记录 / 错题本 / 收藏练习）无论有没有数据都渲染，没数据时置灰，保证可发现
+    eq('没有记录时入口仍渲染（不隐藏）', qa('[data-records]').length, 2);
+    eq('没有记录时入口显示 0', recordsEntry() ? recordsEntry().textContent.trim() : '', '练习记录（0）');
+    ok('没有记录时入口置灰', !!recordsEntry() && recordsEntry().disabled === true);
+
+    // 做一轮：1 对 3 错
+    openBank('web');
+    pickCorrect();
+    submitNow();
+    for (var i = 0; i < 3; i++) {
+      click(q('[data-act="next"]'));
+      pickWrong();
+      submitNow();
+    }
+    finishNow();
+    var resultStats = statValues();
+    eq('练习记录：先做一轮 1 / 3', resultStats, ['1', '3', '25%']);
+
+    /* ------------- ① 做完一轮后记录数 = 1，且能打开 ------------- */
+    click(q('[data-act="back"]'));
+    eq('练习记录：返回列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    var entry = recordsEntry();
+    ok('有记录时出现入口', !!entry);
+    eq('入口文案带记录数', entry ? entry.textContent.trim() : '', '练习记录（1）');
+
+    click(entry);
+    eq('进入练习记录页', text('.h1'), '练习记录');
+    eq('记录页只有 1 条', qa('[data-record]').length, 1);
+    ok('那一行标为已完成', appText().indexOf('已完成') >= 0);
+    ok('那一行有类型/时间/题数/成绩', /普通练习/.test(appText()) && /\d\d-\d\d \d\d:\d\d/.test(appText()) &&
+      appText().indexOf('120 题') >= 0 &&
+      appText().indexOf('答对 ' + resultStats[0] + ' / 119（' + resultStats[2] + '）') >= 0,
+      appText().slice(0, 320));
+
+    /* ------------- ③ 打开已完成轮：只读，数字与当时一致 ------------- */
+    click(q('[data-record]'));
+    eq('打开已完成轮 = 只读结果页', text('.h1'), '答题结果');
+    eq('只读页数字与交卷时完全一致', statValues(), resultStats);
+    ok('只读页标了「只读」', appText().indexOf('这是已完成的一轮记录，只读。') >= 0);
+    eq('只读页不提供跳题（查看）按钮', qa('[data-goto]').length, 0);
+
+    /* ------------- ② 重练轮离开后再进「练习记录」能继续 ------------- */
+    click(q('[data-act="replay"]'));
+    eq('从记录打开的那轮还能再练错题（3 题）', totalCount(), 3);
+    pickCorrect();
+    submitNow();
+    click(q('[data-act="next"]'));
+    eq('走到第 2 题', currentIndex(), 2);
+    pickCorrect(); // 只选不提交：离开后应当还留着
+    click(q('#btnBack'));
+    eq('答题中「返回」回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    var entry2 = recordsEntry();
+    eq('记录数变成 2（已完成 + 进行中）', entry2 ? entry2.textContent.trim() : '', '练习记录（2）');
+    click(entry2);
+    eq('记录页 2 条', qa('[data-record]').length, 2);
+    ok('其中一条是进行中', !!activeRecordRow());
+    ok('进行中一条给出已答进度', appText().indexOf('已答 1 / 3 题') >= 0, appText().slice(0, 320));
+
+    click(activeRecordRow());
+    eq('继续 = 回到同一轮（3 题）', totalCount(), 3);
+    eq('继续回到原题号（第 2 题）', currentIndex(), 2);
+    eq('继续后已答对仍是 1（进度没丢）', correctCount(), 1);
+    ok('继续后仍标明在重练哪一轮', appText().indexOf('重练 · 来自') >= 0);
+
+    // 停在记录页，交给 #records-check 验证「刷新后记录仍在」
+    click(q('#btnBack'));
+    click(recordsEntry());
+    eq('刷新前停在练习记录页', text('.h1'), '练习记录');
+  }
+
+  /* 新一次页面加载：记录仍在，进行中的还能继续 */
+  function runRecordsRefreshCheck() {
+    log('--- 练习记录：刷新后（新一次页面加载，同一 profile）---');
+    eq('刷新后仍停在练习记录页', text('.h1'), '练习记录');
+    eq('刷新后记录仍是 2 条', qa('[data-record]').length, 2);
+    ok('刷新后有已完成的一条', appText().indexOf('已完成') >= 0);
+    ok('刷新后有进行中的一条', !!activeRecordRow());
+
+    click(activeRecordRow());
+    eq('刷新后仍能继续那一轮', totalCount(), 3);
+    eq('刷新后仍是第 2 题', currentIndex(), 2);
+
+    click(q('#btnBack'));
+    eq('刷新后返回列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    var entry = recordsEntry();
+    ok('刷新后入口仍在', !!entry);
+    eq('刷新后记录数仍是 2', entry ? entry.textContent.trim() : '', '练习记录（2）');
+  }
+
+  /* ================= 错题本 + 错题练习 ================= */
+  function wbEntry(key) { return q('[data-wrongbook="' + key + '"]'); }
+  function wbRows() { return qa('.wb-row'); }
+  function wbRowTexts() {
+    return wbRows().map(function (r) { return r.textContent.replace(/\s+/g, ' ').trim(); });
+  }
+  function questionById(id) {
+    var all = window.WEB_BANK.questions;
+    for (var i = 0; i < all.length; i++) if (String(all[i].id) === String(id)) return all[i];
+    return null;
+  }
+  // 章节号 → 章节对象（分组标题要用它）
+  function questionByNo(no) {
+    var chs = window.WEB_BANK.chapters;
+    for (var i = 0; i < chs.length; i++) if (Number(chs[i].no) === Number(no)) return chs[i];
+    return { no: no, title: String(no) };
+  }
+  // 期望顺序：章节号升序 → 题号升序（口径写在 js/core/wrongbook.js）
+  function expectedWrongOrder(ids) {
+    return ids.slice().sort(function (a, b) {
+      var qa = questionById(a), qb = questionById(b);
+      if (qa.chapter !== qb.chapter) return Number(qa.chapter) - Number(qb.chapter);
+      return Number(qa.id) - Number(qb.id);
+    });
+  }
+  // 只用「已提交且判错」这一条口径重算一轮的错题（与页面无关，独立核对）
+  function wrongIdsOf(snap) {
+    var qs = (snap.questionIds || []).map(questionById).filter(Boolean);
+    return window.QuizSession.createModel(qs, snap.answers || {}).wrongIds();
+  }
+
+  // 回到列表再清存储：先清再返回，backToList() 里的「交卷」会往清单里追加一份快照，把期望数搞乱
+  function resetQuizStorageFromList() {
+    if (q('#btnBack') && !q('#btnBack').hidden) click(q('#btnBack'));
+    var guard = 0;
+    while (text('.h1') !== window.QuizCopy.LIST_TITLE && q('[data-act="back"]') && guard++ < 5) {
+      click(q('[data-act="back"]'));
+    }
+    clearQuizStorage();
+    return text('.h1');
+  }
+
+  function runWrongbookChecks() {
+    log('--- 错题本：入口与空状态 ---');
+    eq('错题本检查从列表页开始', resetQuizStorageFromList(), window.QuizCopy.LIST_TITLE);
+
+    var zero = wbEntry('web');
+    ok('没有错题时入口仍保留（可发现）', !!zero);
+    eq('没有错题时入口文案', zero ? zero.textContent.trim() : '', '错题本（0）');
+    ok('没有错题时入口置灰', !!zero && zero.disabled === true && zero.getAttribute('aria-disabled') === 'true');
+    ok('没有错题时给出小字说明', appText().indexOf('还没有错题') >= 0);
+    click(zero);
+    eq('点置灰入口不跳转', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    log('--- 错题本：一轮 1 对 3 错，其余没碰 ---');
+    clearNormalProgress('web');
+    click(q('[data-bank="web"]'));
+    chooseScope('random');
+    chooseRandom(10);
+    click(startBtn());
+    eq('随机 10 题开跑', totalOfCurrentRound(), 10);
+    pickCorrectSkippingInvalid();
+    submitNow();
+    for (var i = 0; i < 3; i++) {
+      click(q('[data-act="next"]'));
+      // 随机抽到的 10 题里可能含数据异常题（answer 为 null）：pickWrong 会返回 null，
+      // 于是这一轮少判一道错。改用会跳过无效题的版本，保证真是「3 错」。
+      pickWrongSkippingInvalid();
+    }
+    finishNow();
+    eq('交卷统计 1 / 3 / 25%（正确率按已答 4 题算）', statValues(), ['1', '3', '25%']);
+    click(q('[data-act="back"]'));
+
+    var firstSnap = roundsOf('web')[0];
+    var wrong1 = expectedWrongOrder(wrongIdsOf(firstSnap));
+    eq('这一轮判错 3 道', wrong1.length, 3);
+    var entry1 = wbEntry('web');
+    eq('入口计数 = 判错题数（没碰的不算）', entry1 ? entry1.textContent.trim() : '', '错题本（3）');
+
+    log('--- 错题本：内容、分组与只读 ---');
+    click(entry1);
+    eq('进入错题本页', text('.h1'), '错题本');
+    eq('列表只有 3 行', wbRows().length, 3);
+    eq('行序 = 章节 → 题号', wbRowTexts().map(function (t) { return Number((/第 (\d+) 题/.exec(t) || [])[1]); }), wrong1);
+    ok('每行写错误次数', wbRowTexts().every(function (t) { return t.indexOf('错 1 次') >= 0; }), wbRowTexts().join(' | '));
+    ok('每行写最近错误时间', /\d\d-\d\d \d\d:\d\d/.test(wbRows()[0].textContent));
+    eq('每行一个题型徽标', qa('.wb-row .badge').length, 3);
+    eq('行是只读的（没有按钮 / 跳题）', qa('.wb-row button, .wb-row [data-goto]').length, 0);
+
+    var chapterNos = [];
+    wrong1.forEach(function (id) {
+      var c = questionByNo(questionById(id).chapter);
+      if (chapterNos.indexOf(c.no) < 0) chapterNos.push(c.no);
+    });
+    var wantTitles = chapterNos.map(function (no) {
+      var n = wrong1.filter(function (id) { return Number(questionById(id).chapter) === Number(no); }).length;
+      return questionByNo(no).title + '（' + n + '）';
+    });
+    eq('按章节分组，组序 = 章节表顺序', qa('.wb-group__title').map(function (h) { return h.textContent.trim(); }), wantTitles);
+
+    log('--- 错题练习：复用 practice 轮，原轮不动 ---');
+    var startWb = q('[data-act="wrongbook-start"]');
+    eq('顶部主按钮带题数', startWb ? startWb.textContent.trim() : '', '错题练习（3）');
+    click(startWb);
+    eq('错题练习轮 3 题', totalCount(), 3);
+    eq('题序 = 错题本顺序', roundState().ids.map(String), wrong1.map(String));
+    ok('答题页标出来源「错题练习」', firstChipsText().indexOf('错题练习 · 共 3 题') >= 0, firstChipsText());
+    ok('答题页正文也有「错题练习」', appText().indexOf('错题练习') >= 0);
+
+    for (var k = 0; k < 3; k++) {
+      pickWrong();
+      submitNow();
+      var nx = q('[data-act="next"]');
+      if (nx) click(nx);
+    }
+    eq('错题练习轮 0 对 3 错', correctCount(), 0);
+    finishNow();
+    click(q('[data-act="back"]'));
+
+    var rounds = roundsOf('web');
+    eq('错题练习另存一轮', rounds.length, 2);
+    eq('原轮成绩一个字都没变', rounds[0].stats, firstSnap.stats);
+    ok('原轮快照没有 origin（形状不变）', !rounds[0].origin);
+    eq('错题练习快照标了 origin', rounds[1].origin, 'wrongbook');
+
+    log('--- 错题本：跨轮去重 ---');
+    var entry2 = wbEntry('web');
+    eq('同一批题错两轮，条目数不涨', entry2 ? entry2.textContent.trim() : '', '错题本（3）');
+    click(entry2);
+    eq('去重后仍是 3 行', wbRows().length, 3);
+    ok('同一题记「错 2 次」', wbRowTexts().every(function (t) { return t.indexOf('错 2 次') >= 0; }), wbRowTexts().join(' | '));
+
+    click(q('[data-act="back"]'));
+    click(recordsEntry());
+    ok('记录页把这一轮标成「错题练习」', appText().indexOf('错题练习') >= 0);
+    ok('记录页仍显示普通轮', appText().indexOf('普通练习') >= 0);
+    click(q('[data-act="back"]'));
+    eq('回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+  }
+
+  /* ================= 收藏（星标）+ 收藏练习 ================= */
+  function starEntry(key) { return q('[data-stars="' + key + '"]'); }
+  function starsMap() {
+    try {
+      var d = JSON.parse(localStorage.getItem('quiz:stars') || 'null');
+      return (d && d.stars) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function starBtnNow() { return q('.meta .star'); }
+
+  function runStarChecks() {
+    var Copy = window.QuizCopy;
+    var Stars = window.QuizStars;
+    log('--- 收藏：入口与空状态 ---');
+    eq('收藏检查从列表页开始', resetQuizStorageFromList(), window.QuizCopy.LIST_TITLE);
+
+    var zero = starEntry('web');
+    ok('没有收藏时入口仍保留（可发现）', !!zero);
+    eq('没有收藏时入口文案', zero ? zero.textContent.trim() : '', '收藏练习（0）');
+    ok('没有收藏时入口置灰', !!zero && zero.disabled === true && zero.getAttribute('aria-disabled') === 'true');
+    ok('没有收藏时给出小字说明', appText().indexOf('还没有标记的题') >= 0);
+
+    log('--- 星标按钮：状态、尺寸、不打断答题 ---');
+    clearNormalProgress('web');
+    openBank('web');
+    eq('普通轮第 1 题', currentIndex(), 1);
+    var s1 = starBtnNow();
+    ok('题目卡片上有星标按钮', !!s1);
+    eq('默认未收藏', s1 ? s1.getAttribute('aria-pressed') : '', 'false');
+    eq('默认是空心星', s1 ? s1.textContent.trim() : '', Copy.STAR_OFF);
+    eq('星标未收藏时读作「标记重点题」', s1 ? s1.getAttribute('aria-label') : '', Copy.STAR_MARK);
+    var rect = s1.getBoundingClientRect();
+    ok('星标触控区 ≥40px', rect.width >= 40 && rect.height >= 40, rect.width + 'x' + rect.height);
+    eq('星标可用键盘聚焦', s1.tagName === 'BUTTON' && s1.tabIndex >= 0, true);
+
+    var q1 = currentData().id;
+    click(s1);
+    eq('点一下变成已收藏', starBtnNow().getAttribute('aria-pressed'), 'true');
+    eq('已收藏显示实心星', starBtnNow().textContent.trim(), Copy.STAR_ON);
+    eq('已收藏时按钮读作「取消标记」', starBtnNow().getAttribute('aria-label'), Copy.STAR_UNMARK);
+    ok('收藏写进 quiz:stars（题目级扁平表）', !!starsMap()['web:' + q1], JSON.stringify(starsMap()));
+    eq('点星不打断答题（仍停在第 1 题、没出现判定）', currentIndex() === 1 && !q('.tip'), true);
+
+    click(starBtnNow());
+    eq('再点一下取消收藏', starBtnNow().getAttribute('aria-pressed'), 'false');
+    ok('取消后存储里没有这条', !starsMap()['web:' + q1], JSON.stringify(starsMap()));
+
+    log('--- 收藏 3 题：跨库隔离与收藏练习轮 ---');
+    click(starBtnNow()); // 第 1 题
+    click(q('[data-act="next"]'));
+    click(starBtnNow()); // 第 2 题
+    click(q('[data-act="next"]'));
+    click(starBtnNow()); // 第 3 题
+    var starredIds = Object.keys(starsMap()).map(function (k) { return k.split(':')[1]; });
+    eq('收藏 3 题', starredIds.length, 3);
+
+    click(q('#btnBack'));
+    eq('返回列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    eq('web 收藏计数 3', starEntry('web') ? starEntry('web').textContent.trim() : '', '收藏练习（3）');
+    eq('收藏按题库隔离（Java 仍是 0）', starEntry('java') ? starEntry('java').textContent.trim() : '', '收藏练习（0）');
+    ok('Java 的收藏入口同样置灰', starEntry('java').disabled === true);
+
+    click(starEntry('web'));
+    eq('收藏练习题数 = 收藏数', totalCount(), 3);
+    var wantOrder = window.WEB_BANK.questions
+      .filter(function (x) { return starsMap()['web:' + x.id]; })
+      .map(function (x) { return String(x.id); });
+    eq('收藏练习题序 = 题库原序', roundState().ids.map(String), wantOrder);
+    ok('答题页标出来源「收藏练习」', firstChipsText().indexOf('收藏练习 · 共 3 题') >= 0, firstChipsText());
+    eq('收藏练习轮里星标仍是实心（同一颗星）', starBtnNow().getAttribute('aria-pressed'), 'true');
+    ok('QuizStars.ids 与页面一致', JSON.stringify(Stars.ids(window.WEB_BANK).map(String)) === JSON.stringify(wantOrder));
+
+    finishNow();
+    eq('交卷后到结果页', text('.h1'), '答题结果');
+    click(q('[data-act="back"]'));
+    var lastSnap = roundsOf('web');
+    eq('收藏练习快照标了 origin', (lastSnap[lastSnap.length - 1] || {}).origin, 'stars');
+    click(recordsEntry());
+    ok('记录页把这一轮标成「收藏练习」', appText().indexOf('收藏练习') >= 0);
+    click(q('[data-act="back"]'));
+    eq('回到列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+  }
+
+  /* 新一次页面加载前的准备：收藏 2 题 + 做错 1 题（错题本 1 条） */
+  function runStarsWrite() {
+    log('--- 错题本 / 收藏：准备数据（下一次加载验证还在）---');
+    resetQuizStorageFromList();
+    clearNormalProgress('web');
+    openBank('web');
+    click(starBtnNow());
+    click(q('[data-act="next"]'));
+    click(starBtnNow());
+    pickWrong();
+    submitNow();
+    finishNow();
+    backToList();
+    eq('准备：收藏 2 题', starEntry('web') ? starEntry('web').textContent.trim() : '', '收藏练习（2）');
+    eq('准备：错题本 1 题', wbEntry('web') ? wbEntry('web').textContent.trim() : '', '错题本（1）');
+  }
+
+  /* 新一次页面加载：星标与错题本都还在 */
+  function runStarsRefreshCheck() {
+    var Copy = window.QuizCopy;
+    log('--- 错题本 / 收藏：刷新后（新一次页面加载，同一 profile）---');
+    eq('刷新后仍在列表页', text('.h1'), window.QuizCopy.LIST_TITLE);
+    eq('刷新后收藏仍在（2 题）', starEntry('web') ? starEntry('web').textContent.trim() : '', '收藏练习（2）');
+    eq('刷新后错题本仍在（1 题）', wbEntry('web') ? wbEntry('web').textContent.trim() : '', '错题本（1）');
+
+    click(starEntry('web'));
+    eq('刷新后收藏练习还是 2 题', totalCount(), 2);
+    eq('刷新后星标仍是实心', starBtnNow().getAttribute('aria-pressed'), 'true');
+    eq('刷新后星标仍是实心星形', starBtnNow().textContent.trim(), Copy.STAR_ON);
+    click(q('#btnBack'));
+
+    click(wbEntry('web'));
+    eq('刷新后错题本能打开', text('.h1'), '错题本');
+    eq('刷新后错题本 1 行', wbRows().length, 1);
+    ok('刷新后仍记着错 1 次', wbRowTexts()[0].indexOf('错 1 次') >= 0, wbRowTexts()[0]);
+    click(q('[data-act="back"]'));
+    eq('刷新后回到列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+  }
+
+  /* ================= 首页「最近练习」 ================= */
+  // 两个题库的已完成快照合并后按 finishedAt 倒序取前 3 条（与 app.js 的 recentRounds 同口径）
+  function expectedRecentRows() {
+    var out = [];
+    ['java', 'web'].forEach(function (k) {
+      roundsOf(k).forEach(function (s) {
+        out.push({ key: 'round:' + s.id, bankKey: k, finishedAt: s.finishedAt || '', stats: s.stats || {} });
+      });
+    });
+    out.sort(function (a, b) {
+      if (a.finishedAt === b.finishedAt) return 0;
+      return a.finishedAt < b.finishedAt ? 1 : -1;
+    });
+    return out.slice(0, 3);
+  }
+
+  function runRecentChecks() {
+    var Copy = window.QuizCopy;
+    log('--- 首页「最近练习」---');
+    clearQuizStorage();
+    ensureList();
+    eq('最近练习检查从列表页开始', text('.h1'), Copy.LIST_TITLE);
+
+    /* ---------- 空态 ---------- */
+    ok('首页有「最近练习」区块', !!q('.recent'));
+    eq('区块标题', text('.recent__title'), Copy.RECENT_TITLE);
+    eq('没有记录时不渲染任何行', qa('[data-recent]').length, 0);
+    eq('空态一句话', text('.recent__empty-text'), Copy.RECENT_EMPTY);
+    var miniStart = q('[data-act="recent-start"]');
+    ok('空态给一个「开始」按钮',
+      !!miniStart && miniStart.textContent.trim() === Copy.RECENT_START,
+      miniStart ? miniStart.textContent.trim() : '没有按钮');
+    ok('空态按钮高 32px（和一行入口同一档）',
+      !!miniStart && Math.abs(miniStart.getBoundingClientRect().height - 32) < 0.6,
+      miniStart ? miniStart.getBoundingClientRect().height : '—');
+    click(miniStart);
+    ok('点「开始」拉起「开始一轮」面板', panelOpen());
+    ok('面板默认打开 Web 题库', panelText().indexOf(window.WEB_BANK.title) >= 0, panelText().slice(0, 60));
+    click(q('[data-modal-close]'));
+    ok('关掉面板仍在首页', text('.h1') === Copy.LIST_TITLE && !panelOpen());
+
+    /* ---------- 做 4 轮（跨两个题库）---------- */
+    var plan = ['web', 'web', 'java', 'java'];
+    for (var i = 0; i < plan.length; i++) {
+      openBank(plan[i]);
+      answerOne();
+      finishNow();
+      eq('第 ' + (i + 1) + ' 轮交卷成功', text('.h1'), '答题结果');
+      click(q('[data-act="back"]'));
+      eq('做完第 ' + (i + 1) + ' 轮回到列表', text('.h1'), Copy.LIST_TITLE);
+    }
+
+    var expect = expectedRecentRows();
+    eq('快照确实存了 4 条', roundsOf('web').length + roundsOf('java').length, 4);
+    var rows = qa('[data-recent]');
+    eq('最近练习最多列 3 条', rows.length, 3);
+    eq('列的是最近 3 条、按完成时间倒序',
+      rows.map(function (r) { return r.getAttribute('data-recent'); }),
+      expect.map(function (e) { return e.key; }));
+
+    /* ---------- 第一条的内容都对得上快照 ---------- */
+    var row0 = rows[0];
+    eq('第一条题库名', row0.querySelector('.recent-row__bank').textContent.trim(), window.JAVA_BANK.title);
+    eq('第一条范围标签',
+      row0.querySelector('.recent-row__scope').textContent.trim(),
+      window.QuizScope.label(window.JAVA_BANK, { type: 'all', chapterNos: [], n: 0 }));
+    eq('第一条正确率', row0.querySelector('.recent-row__score').textContent.trim(),
+      expect[0].stats.accuracy + '%');
+    eq('第一条答对数', row0.querySelector('.recent-row__hint').textContent.trim(),
+      Copy.RECENT_SCORE(expect[0].stats.correct, expect[0].stats.scorable));
+    eq('第一条完成时间', row0.querySelector('.recent-row__when').textContent.trim(),
+      Copy.RECENT_WHEN(expect[0].finishedAt));
+
+    /* ---------- 排版：56px 一行、无外阴影、靠分隔线分层、横跨整页 ---------- */
+    var narrow = window.innerWidth < 768;
+    var rowR = row0.getBoundingClientRect();
+    ok('行高 56px（手机至少 56）', narrow ? rowR.height >= 55.4 : Math.abs(rowR.height - 56) < 0.6,
+      'h=' + rowR.height);
+    eq('行没有外阴影（不跟上面的卡片抢层级）', getComputedStyle(row0).boxShadow, 'none');
+    var pageEl = q('.page--list');
+    var pagePad = parseFloat(getComputedStyle(pageEl).paddingRight);
+    var recentW = q('.recent').getBoundingClientRect().width;
+    var contentW = pageEl.getBoundingClientRect().width - pagePad * 2;
+    ok('区块横跨整页内容宽（双栏下也是通栏）', Math.abs(recentW - contentW) < 1.5,
+      'recent=' + recentW.toFixed(1) + ' content=' + contentW.toFixed(1));
+    var sep = getComputedStyle(rows[1], '::before');
+    ok('行与行之间有 1px 分隔线', Math.abs(parseFloat(sep.height) - 1) < 0.2, 'h=' + sep.height);
+    ok('分隔线压到 60% 不透明度', Math.abs(parseFloat(sep.opacity) - 0.6) < 0.02, 'opacity=' + sep.opacity);
+
+    var bB = row0.querySelector('.recent-row__bank').getBoundingClientRect();
+    var sB = row0.querySelector('.recent-row__scope').getBoundingClientRect();
+    var cB = row0.querySelector('.recent-row__score').getBoundingClientRect();
+    var wB = row0.querySelector('.recent-row__when').getBoundingClientRect();
+    ok(narrow ? '手机：第一行题库名 + 时间，范围掉到第二行'
+      : '桌面：一行三栏（时间在正确率右边、范围在题库名下）',
+      narrow ? (wB.top < sB.top - 2 && Math.abs(bB.top - wB.top) < 8)
+        : (wB.left > cB.right + 2 && sB.top > bB.bottom - 1),
+      JSON.stringify({ bank: bB.top, scope: sB.top, score: cB.top, when: wB.top }));
+
+    /* ---------- 悬停：只换底色，不位移、不出现外阴影 ---------- */
+    noTransitions();
+    var rh = hoverMeasure(row0);
+    eq('行悬停底色变 --bg-2', rh.after.bg, appVar('--bg-2'));
+    eq('行悬停不位移', rh.after.rect, rh.before.rect);
+    eq('行悬停不加 transform', rh.after.transform, 'none');
+    eq('行默认无底色', rh.before.bg, 'rgba(0, 0, 0, 0)');
+    eq('行悬停不会冒出一圈外阴影', rh.after.shadow, rh.before.shadow);
+    restoreTransitions();
+
+    /* ---------- 点击打开对应的只读结果页 ---------- */
+    click(row0);
+    eq('点最近练习的一条 = 只读结果页', text('.h1'), '答题结果');
+    eq('打开的那一轮统计与快照一致', statValues(),
+      [String(expect[0].stats.correct), String(expect[0].stats.wrong), expect[0].stats.accuracy + '%']);
+    ok('打开的是只读快照', appText().indexOf('只读') >= 0);
+    click(q('[data-act="back"]'));
+    eq('从结果页回到列表', text('.h1'), Copy.LIST_TITLE);
+
+    /* ---------- 「全部记录 ›」 ---------- */
+    var allBtn = q('[data-act="all-records"]');
+    ok('标题右侧有「全部记录 ›」',
+      !!allBtn && allBtn.textContent.trim() === Copy.RECENT_ALL,
+      allBtn ? allBtn.textContent.trim() : '没有按钮');
+    click(allBtn);
+    eq('点「全部记录」进练习记录页', text('.h1'), Copy.RECORDS_TITLE);
+    eq('记录页列出最近那一轮的题库的全部记录', qa('[data-record]').length, roundsOf('java').length);
+    click(q('[data-act="back"]'));
+    eq('从记录页回到列表', text('.h1'), Copy.LIST_TITLE);
+  }
+
+  /* ================= 开始一轮：范围选择 ================= */
+  // 稳准地停在题库列表（不误触交卷）
+  function ensureList() {
+    if (text('.h1') === window.QuizCopy.LIST_TITLE) return true;
+    if (q('[data-act="back"]')) { click(q('[data-act="back"]')); return true; }
+    leaveQuiz();
+    return text('.h1') === window.QuizCopy.LIST_TITLE;
+  }
+
+  // 答题页点顶栏「返回」离开：不交卷，进度保留
+  function leaveQuiz() {
+    var b = q('#btnBack');
+    if (b && !b.hidden) { click(b); return true; }
+    return false;
+  }
+
+  // 答题页顶部第一组徽标（普通轮 = 范围；重练轮 = 来源）
+  function firstChipsText() {
+    var el = q('#app .chips');
+    return el ? el.textContent.trim() : '';
+  }
+
+  function runScopeChecks() {
+    var web = window.WEB_BANK;
+    log('--- 开始一轮：范围选择 ---');
+
+    clearQuizStorage();
+    ensureList();
+    eq('范围检查从题库列表开始', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    /* ---------- 面板本身 ---------- */
+    click(q('[data-bank="web"]'));
+    ok('点题库卡片弹出「开始一轮」面板', panelOpen());
+    eq('面板标题是「开始一轮」', text('#modalTitle'), '开始一轮');
+    ok('副标题带题库名与总题数', panelText().indexOf('Web前端题库 · 共 120 题') >= 0, panelText().slice(0, 120));
+    eq('默认选中「全部」', q('[data-scope-type="all"]').getAttribute('aria-pressed'), 'true');
+    ok('「全部」注明题数与顺序', panelText().indexOf('120 题 · 题库原顺序') >= 0, panelText().slice(0, 120));
+    // 只有 aria-pressed 变了、肉眼看不出来，等于没做选中态
+    var pressedStyle = getComputedStyle(q('[data-scope-type="all"]'));
+    var plainStyle = getComputedStyle(q('[data-scope-type="chapters"]'));
+    ok('选中的范围行看得出来（阴影与文字色都和未选中不同）',
+      pressedStyle.boxShadow !== plainStyle.boxShadow && pressedStyle.color !== plainStyle.color,
+      pressedStyle.boxShadow + ' || ' + plainStyle.boxShadow);
+    ok('没有进行中的一轮时不显示横幅', panelText().indexOf('有一轮没做完') < 0);
+
+    /* ---------- 三个范围行左侧的 Lucide 图标 ---------- */
+    (function () {
+      var icons = qa('[data-scope-type] .scope-ico');
+      eq('三个范围行各有 1 个图标', icons.length, 3);
+      ok('图标是 20×20', icons.every(function (s) {
+        var b = s.getBoundingClientRect();
+        return Math.abs(b.width - 20) < 0.6 && Math.abs(b.height - 20) < 0.6;
+      }), icons.map(function (s) {
+        return Math.round(s.getBoundingClientRect().width) + 'x' + Math.round(s.getBoundingClientRect().height);
+      }).join(','));
+      ok('图标线宽 1.5、描边用 currentColor、无填充', icons.every(function (s) {
+        var cs = getComputedStyle(s);
+        return s.getAttribute('stroke-width') === '1.5' &&
+          s.getAttribute('stroke') === 'currentColor' &&
+          s.getAttribute('fill') === 'none' &&
+          cs.fill === 'none';
+      }), icons[0].outerHTML.slice(0, 120));
+      ok('图标对读屏隐藏', icons.every(function (s) {
+        return s.getAttribute('aria-hidden') === 'true';
+      }));
+      // 未选中的行：图标是 --ink-3
+      eq('未选中行图标是 --ink-3', getComputedStyle(q('[data-scope-type="chapters"] .scope-ico')).color,
+        appVar('--ink-3'));
+      // 选中「按章节」：图标和文字一起变强调色
+      chooseScope('chapters');
+      eq('选中行图标用 --accent-ink', getComputedStyle(q('[data-scope-type="chapters"] .scope-ico')).color,
+        appVar('--accent-ink'));
+      eq('选中行文字与图标同色（文字跟着变紫）',
+        getComputedStyle(q('[data-scope-type="chapters"]')).color,
+        getComputedStyle(q('[data-scope-type="chapters"] .scope-ico')).color);
+      ok('未选中的行图标仍是灰的', getComputedStyle(q('[data-scope-type="all"] .scope-ico')).color === appVar('--ink-3'),
+        getComputedStyle(q('[data-scope-type="all"] .scope-ico')).color);
+      // 图标不缩、文字起点三个行都在同一 x（左边缘对齐）
+      var x0 = null, aligned = true;
+      qa('[data-scope-type] .scope-ico').forEach(function (s) {
+        var x = Math.round(s.getBoundingClientRect().left);
+        if (x0 === null) x0 = x;
+        else if (x !== x0) aligned = false;
+      });
+      ok('三个范围的图标左边缘对齐', aligned, 'x0=' + x0);
+      chooseScope('all');
+
+      // 375px 预算：面板内宽减去图标与间隙后，文字仍放得下「按章节」三个字且不换行
+      var label = q('[data-scope-type="chapters"] > span');
+      ok('范围文字不换行', getComputedStyle(label).whiteSpace === 'nowrap',
+        getComputedStyle(label).whiteSpace);
+      ok('范围文字至少显示 2 个字（宽度 ≥ 26px）', label.getBoundingClientRect().width >= 26,
+        'w=' + label.getBoundingClientRect().width.toFixed(1));
+      ok('面板里三个范围行没有横向溢出',
+        q('.modal--panel').scrollWidth <= q('.modal--panel').clientWidth + 1,
+        'sw=' + q('.modal--panel').scrollWidth + ' cw=' + q('.modal--panel').clientWidth);
+    })();
+
+    chooseScope('chapters');
+    eq('章节模式列出 6 章', qa('[data-scope-chapter]').length, 6);
+    ok('章节行带该章题数', panelText().indexOf('HTML进阶') >= 0 && panelText().indexOf('15 题') >= 0, panelText().slice(0, 200));
+    eq('一章都没选时「开始」禁用', startBtn().disabled, true);
+    ok('一章都没选时给出提示', panelText().indexOf('至少选 1 章') >= 0);
+
+    chooseScope('random');
+    eq('随机档位是 10 / 20 / 50', qa('[data-scope-n]').map(function (e) { return e.getAttribute('data-scope-n'); }), ['10', '20', '50']);
+    eq('随机档位默认选中 10', q('[data-scope-n="10"]').getAttribute('aria-pressed'), 'true');
+
+    /* ---------- 全部：120 题 ---------- */
+    chooseScope('all');
+    ok('「全部」可以开始', !startBtn().disabled);
+    click(startBtn());
+    eq('全部：Web 120 题', roundState().total, 120);
+    eq('全部：范围标签', roundState().label, '全部 120 题');
+    eq('全部：答题页显示范围徽标', firstChipsText(), '全部 120 题');
+    pickCorrect();
+    submitNow();
+    finishNow();
+    eq('交卷后进入结果页', text('.h1'), '答题结果');
+    ensureList();
+
+    /* ---------- 章节：只选「二、HTML进阶」 ---------- */
+    click(q('[data-bank="web"]'));
+    ok('已交卷的一轮不再算「没做完」', panelText().indexOf('有一轮没做完') < 0);
+    chooseScope('chapters');
+    chooseChapters([2]);
+    ok('选中章节后「开始」可用', !startBtn().disabled);
+    eq('选中的章节行是按下态', q('[data-scope-chapter="2"]').getAttribute('aria-pressed'), 'true');
+    ok('选中的章节行看得出选中（文字色与未选章节不同）',
+      getComputedStyle(q('[data-scope-chapter="2"]')).color !== getComputedStyle(q('[data-scope-chapter="1"]')).color,
+      getComputedStyle(q('[data-scope-chapter="2"]')).color + ' || ' + getComputedStyle(q('[data-scope-chapter="1"]')).color);
+    click(startBtn());
+    eq('只选「二、HTML进阶」：15 题', roundState().total, 15);
+    eq('章节轮范围标签', roundState().label, '二、HTML进阶 15 题');
+    eq(
+      '章节轮题序 = 题库里该章的原序',
+      roundState().ids,
+      web.questions.filter(function (x) { return x.chapter === 2; }).map(function (x) { return x.id; })
+    );
+    ok('答题页范围徽标是章节名', firstChipsText().indexOf('HTML进阶') >= 0, firstChipsText());
+    pickCorrect();
+    submitNow();
+    finishNow();
+    ensureList();
+
+    /* ---------- 随机 20：抽一次就固定 ---------- */
+    click(q('[data-bank="web"]'));
+    chooseScope('random');
+    chooseRandom(20);
+    ok('选 20 题后「开始」可用', !startBtn().disabled);
+    click(startBtn());
+    var rnd = roundState();
+    eq('随机 20 题：20 题', rnd.ids.length, 20);
+    eq('随机 20 题：范围标签', rnd.label, '随机 20 题');
+    var uniq = {};
+    for (var i = 0; i < rnd.ids.length; i++) uniq[rnd.ids[i]] = 1;
+    eq('随机 20 题没有重复题号', Object.keys(uniq).length, 20);
+    var allIds = web.questions.map(function (x) { return x.id; });
+    eq('随机题的题号都来自该题库', rnd.ids.filter(function (id) { return allIds.indexOf(id) < 0; }).length, 0);
+    var stored = JSON.parse(localStorage.getItem('quiz:progress:web'));
+    eq('随机题号已存进这一轮', stored.questionIds, rnd.ids);
+    eq('随机范围也存进这一轮', stored.scope, { type: 'random', chapterNos: [], n: 20 });
+    var reread = new window.QuizSession.Session(web, {});
+    eq('重新读回（刷新所走的路径）：题号不变', reread.questionIds, rnd.ids);
+    eq('重新读回（刷新所走的路径）：范围不变', reread.scope, { type: 'random', chapterNos: [], n: 20 });
+    answerOne();
+    finishNow();
+    ensureList();
+
+    /* ---------- 有进行中的一轮：换范围开始要二次确认 ---------- */
+    click(q('[data-bank="web"]'));
+    chooseScope('random');
+    chooseRandom(50);
+    click(startBtn());
+    eq('随机 50 题：50 题', roundState().total, 50);
+    answerOne();
+    ok('不交卷离开答题页（点顶栏返回）', leaveQuiz());
+    eq('离开后回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    var doneBefore = roundsOf('web').length;
+    click(q('[data-bank="web"]'));
+    ok('面板顶部提示有一轮没做完', panelText().indexOf('有一轮没做完') >= 0, panelText().slice(0, 160));
+    ok('面板给出「继续」', !!q('[data-act="continue"]'));
+    ok('面板给出「重新开始」', !!q('[data-act="restart"]'));
+    chooseScope('all');
+    click(startBtn());
+    ok('换范围开始要二次确认', panelText().indexOf('历史练习记录不受影响') >= 0, panelText().slice(0, 200));
+    click(q('[data-modal-confirm]'));
+    eq('确认后按新范围开始：全部 120 题', roundState().total, 120);
+    eq('放弃旧轮不影响已完成记录条数', roundsOf('web').length, doneBefore);
+    ok('旧轮题号已被清掉（全部轮不存题号）', !JSON.parse(localStorage.getItem('quiz:progress:web')).questionIds);
+
+    /* ---------- 重新开始：清空这一轮 ---------- */
+    pickCorrect();
+    submitNow();
+    ok('作答后再离开答题页', leaveQuiz());
+    click(q('[data-bank="web"]'));
+    ok('横幅仍在（全部轮进行中）', panelText().indexOf('有一轮没做完') >= 0);
+    click(q('[data-act="restart"]'));
+    ok('「重新开始」要二次确认', panelText().indexOf('会清空这一轮未完成的作答') >= 0, panelText().slice(0, 200));
+    click(q('[data-modal-confirm]'));
+    eq('重新开始后进度键被清空', localStorage.getItem('quiz:progress:web'), null);
+    ok('清空后面板里的横幅消失', panelText().indexOf('有一轮没做完') < 0);
+    ok('清空后仍留在面板里选范围', panelOpen());
+    eq('清空不影响已完成记录', roundsOf('web').length, doneBefore);
+
+    /* ---------- 记录页：范围标签 ---------- */
+    click(q('[data-modal-close]'));
+    ensureList();
+    var entry = recordsEntry();
+    ok('练习记录入口在', !!entry);
+    var recs = window.QuizRound.records(web, window.localStorage);
+    var kinds = recs.map(function (r) { return r.status + '/' + (r.scopeLabel || '-'); }).join(' , ');
+    ok('入口带记录数（= 现有记录条数）', entry ? entry.textContent.indexOf('（' + recs.length + '）') >= 0 : false,
+      (entry ? entry.textContent : '') + ' <<< ' + kinds);
+    click(entry);
+    var t = appText();
+    ok('记录里有「全部 120 题」', t.indexOf('全部 120 题') >= 0);
+    ok('记录里有「二、HTML进阶 15 题」', t.indexOf('HTML进阶 15 题') >= 0);
+    ok('记录里有「随机 20 题」', t.indexOf('随机 20 题') >= 0);
+    ok('记录行标题是「普通练习 · 范围」', t.indexOf('普通练习') >= 0 && t.indexOf(' · ') >= 0);
+
+    /* ---------- 全部：Java 219 题 ---------- */
+    ensureList();
+    click(q('[data-bank="java"]'));
+    chooseScope('all');
+    click(startBtn());
+    eq('全部：Java 219 题', roundState().total, 219);
+    eq('Java 范围标签', roundState().label, '全部 219 题');
+
+    /* ---------- 收尾：留一轮进行中的随机 20，给刷新检查对照 ---------- */
+    ok('Java 这一轮离开（不交卷）', leaveQuiz());
+    click(q('[data-bank="web"]'));
+    chooseScope('random');
+    chooseRandom(20);
+    click(startBtn());
+    var keep = roundState();
+    eq('收尾：随机 20 题', keep.ids.length, 20);
+    answerOne();
+    ok('收尾：留在答题页（刷新恢复的现场）', !!q('.meta'));
+    ok('收尾：题号已落盘', JSON.parse(localStorage.getItem('quiz:progress:web')).questionIds.length === 20);
+    localStorage.setItem('quiz:e2e:scopeIds', JSON.stringify(keep.ids));
+  }
+
+  function runScopeRefreshCheck() {
+    log('--- 范围选择：刷新后题号不变 ---');
+    var saved = JSON.parse(localStorage.getItem('quiz:e2e:scopeIds') || 'null');
+    ok('刷新前留下的随机题号还在（20 题）', !!saved && saved.length === 20);
+    eq('刷新后仍在答题页', !!q('.meta'), true);
+    var s = window.QuizApp.session();
+    eq('刷新后题号与刷新前完全一致', s ? s.questionIds : null, saved);
+    eq('刷新后范围标签仍是「随机 20 题」', s ? s.scopeLabel() : '', '随机 20 题');
+    eq('刷新后进度分母仍是 20', totalOfCurrentRound(), 20);
+    eq('刷新后范围徽标仍显示', firstChipsText(), '随机 20 题');
+    ok('刷新后点「返回」离开', leaveQuiz());
+    eq('离开后回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    var entry = recordsEntry();
+    ok('有进行中的一轮时入口仍在', !!entry);
+    click(entry);
+    var row = activeRecordRow();
+    ok('记录里有这一轮（进行中）', !!row);
+    ok('记录行标签带范围「随机 20 题」', row ? row.textContent.indexOf('随机 20 题') >= 0 : false, row ? row.textContent : '');
+    click(row);
+    var back = window.QuizApp.session();
+    eq('继续回来的还是同一批题号', back ? back.questionIds : null, saved);
+  }
+
+  /* ================= 题目反馈 + 维护日志 ================= */
+  function fbRaw() {
+    try {
+      return JSON.parse(localStorage.getItem('quiz:feedback') || 'null');
+    } catch (e) {
+      return null;
+    }
+  }
+  function fbItems() {
+    var d = fbRaw();
+    return (d && d.items) || [];
+  }
+  function fbPanelOpen() { return !!q('[data-fb-kind]') || !!q('[data-fb-copy-one]'); }
+  function fbInfoValues() {
+    return qa('.fb-info__val').map(function (e) { return e.textContent.trim(); });
+  }
+  function openFeedbackOnCurrent() {
+    var link = q('.fb-link');
+    if (!link) return false;
+    click(link);
+    return fbPanelOpen();
+  }
+
+  /* ================= 悬停：只收紧一档 ================= */
+  /* file:// 是不透明源：读不到 document.styleSheets[0].cssRules，
+     getComputedStyle(el, ':hover') 恒为空串，也没有真实指针。
+     所以量 :hover 走「镜像类」——CSS 里把 :hover 与 .state-hover 写进同一条规则，
+     量到的就是悬停真正生效的那组声明。 */
+  var SH_HOVER_LIGHT = 'rgb(184, 188, 194) 6px 6px 12px 0px, rgb(255, 255, 255) -6px -6px 12px 0px';
+  var SH_HOVER_DARK = 'rgb(33, 36, 41) 6px 6px 12px 0px, rgb(63, 69, 78) -6px -6px 12px 0px';
+  var SH_SM_LIGHT = 'rgb(184, 188, 194) 4px 4px 8px 0px, rgb(255, 255, 255) -4px -4px 8px 0px';
+  var SH_SM_DARK = 'rgb(33, 36, 41) 4px 4px 8px 0px, rgb(63, 69, 78) -4px -4px 8px 0px';
+  // 32px 高的一行入口（练习记录 / 错题本 / 收藏练习）再掉一小档：4/8 → 3/6
+  var SH_XS_LIGHT = 'rgb(184, 188, 194) 3px 3px 6px 0px, rgb(255, 255, 255) -3px -3px 6px 0px';
+  var SH_XS_DARK = 'rgb(33, 36, 41) 3px 3px 6px 0px, rgb(63, 69, 78) -3px -3px 6px 0px';
+
+  function rectOf(el) {
+    var r = el.getBoundingClientRect();
+    return [r.left, r.top, r.width, r.height, r.right, r.bottom].join('/');
+  }
+
+  function hoverSnap(el) {
+    var cs = getComputedStyle(el);
+    return {
+      rect: rectOf(el),
+      shadow: cs.boxShadow,
+      bg: cs.backgroundColor,
+      color: cs.color,
+      radius: cs.borderRadius,
+      transform: cs.transform
+    };
+  }
+
+  // 加上镜像类量一次，量完立刻摘掉（不留在页面上影响后面的断言）
+  function hoverMeasure(el) {
+    if (!el) return null;
+    var before = hoverSnap(el);
+    el.classList.add('state-hover');
+    var after = hoverSnap(el);
+    el.classList.remove('state-hover');
+    return { before: before, after: after };
+  }
+
+  // 一个元素一组：阴影值写死 + 位置/底色/字色/圆角/transform 全不变
+  function hoverChecks(name, el, expectShadow) {
+    var h = hoverMeasure(el);
+    if (!h) { ok(name + '：找得到元素', false, '元素不存在'); return; }
+    eq(name + '：悬停阴影是写死的这一档', h.after.shadow, expectShadow);
+    eq(name + '：悬停不动位置与尺寸', h.after.rect, h.before.rect);
+    eq(name + '：悬停不改底色', h.after.bg, h.before.bg);
+    eq(name + '：悬停不改文字色', h.after.color, h.before.color);
+    eq(name + '：悬停不改圆角', h.after.radius, h.before.radius);
+    eq(name + '：悬停不加 transform', h.after.transform, 'none');
+  }
+
+  function runHoverChecks() {
+    log('--- 悬停：每个可点元素都有可见反馈，位置不动 ---');
+    // 组件上 box-shadow 有 300ms 过渡，加类后立刻读会读到过渡起点，量到的还是 8/16
+    noTransitions();
+    resetQuizStorageFromList();
+    eq('悬停检查从列表页开始', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    // 大卡片：掉一整档 8/16 → 4/8（6/12 只差 2px，大面上看不出来）
+    var card = q('.card--clickable');
+    hoverChecks('题库卡片', card, SH_SM_LIGHT);
+    var cardShadow = hoverMeasure(card).after.shadow;
+    ok('卡片悬停明显变浅（不是只差 2px）', cardShadow.indexOf('4px 4px 8px') !== -1, cardShadow);
+    ok('卡片悬停的偏移是 4/-4', JSON.stringify(shadowPairs(cardShadow)), JSON.stringify([[4, 4], [-4, -4]]));
+
+    // 开始面板（.modal__actions）：次要按钮浮出淡底，主按钮亮一档
+    click(q('.card--clickable[data-bank="web"]') || card);
+    eq('开始面板打开', !!q('[data-act="start-round"]'), true);
+    var pCancel = q('.modal__actions .btn:not(.btn--primary)');
+    var pc = hoverMeasure(pCancel);
+    ok('面板「取消」默认是 --bg 底', pc.before.bg === appVar('--bg'), pc.before.bg);
+    eq('面板「取消」悬停浮出 --bg-2 淡底', pc.after.bg, appVar('--bg-2'));
+    eq('面板「取消」悬停字色变深到 --ink', pc.after.color, appVar('--ink'));
+    eq('面板「取消」悬停阴影 3/6 档', pc.after.shadow, SH_XS_LIGHT);
+    eq('面板「取消」悬停不位移', pc.after.rect, pc.before.rect);
+    var pStart = q('.modal__actions .btn--primary:not([disabled])');
+    if (pStart) {
+      var ps = hoverMeasure(pStart);
+      eq('面板主按钮悬停背景亮一档', ps.after.bg, appVar('--accent-hover'));
+      eq('面板主按钮悬停阴影 6/12 档', ps.after.shadow, SH_HOVER_LIGHT);
+      eq('面板主按钮悬停不位移', ps.after.rect, ps.before.rect);
+    }
+    click(pCancel);
+    eq('点「取消」后面板收起', !!q('[data-act="start-round"]'), false);
+
+    // 答题页：选项 / 星标 / 顶栏「返回」
+    openBank('web', 'all');
+    eq('进入答题页', !!q('.actionbar'), true);
+
+    var opt = q('.opt:not(.opt--selected):not([disabled])');
+    var ob = hoverMeasure(opt);
+    eq('选项默认压在 4/8 档', ob.before.shadow, SH_SM_LIGHT);
+    eq('选项悬停浮出 --bg-2 淡底', ob.after.bg, appVar('--bg-2'));
+    eq('选项悬停阴影仍 4/8（不抬层级）', ob.after.shadow, SH_SM_LIGHT);
+    eq('选项悬停不位移', ob.after.rect, ob.before.rect);
+    eq('选项悬停不加 transform', ob.after.transform, 'none');
+
+    var star = q('.star');
+    if (star) {
+      var sb = hoverMeasure(star);
+      eq('星标悬停浮出 --bg-2 淡底', sb.after.bg, appVar('--bg-2'));
+      eq('星标悬停不位移', sb.after.rect, sb.before.rect);
+    }
+
+    var back = q('#btnBack');
+    if (back && !back.hidden) {
+      var bb = hoverMeasure(back);
+      ok('顶栏「返回」默认透明底', bb.before.bg === 'rgba(0, 0, 0, 0)', bb.before.bg);
+      eq('顶栏「返回」悬停浮出 --bg-2 淡底', bb.after.bg, appVar('--bg-2'));
+      eq('顶栏「返回」悬停字色变深到 --ink', bb.after.color, appVar('--ink'));
+      eq('顶栏「返回」悬停阴影仍为无', bb.after.shadow, 'none');
+      eq('顶栏「返回」悬停不位移', bb.after.rect, bb.before.rect);
+    }
+
+    // 选中一个选项：普通按钮掉一整档、主按钮亮底、选中项浮出强调色淡底
+    click(q('[data-opt="A"]'));
+    hoverChecks('普通按钮', q('.actionbar .btn:not(.btn--primary):not([disabled])'), SH_SM_LIGHT);
+    var pb = hoverMeasure(q('.actionbar .btn--primary'));
+    eq('强调主按钮悬停阴影 6/12 档', pb.after.shadow, SH_HOVER_LIGHT);
+    eq('强调主按钮悬停背景是 --accent-hover', pb.after.bg, appVar('--accent-hover'));
+    ok('强调主按钮悬停底色比默认亮', pb.after.bg !== pb.before.bg, pb.before.bg + ' → ' + pb.after.bg);
+    eq('强调主按钮悬停不位移', pb.after.rect, pb.before.rect);
+    var sel = q('.opt--selected');
+    if (sel) {
+      var sh = hoverMeasure(sel);
+      eq('已选选项悬停浮出 --accent-soft', sh.after.bg, appVar('--accent-soft'));
+      ok('已选选项悬停保持凹陷（inset）', sh.after.shadow.indexOf('inset') !== -1, sh.after.shadow);
+      eq('已选选项悬停不位移', sh.after.rect, sh.before.rect);
+    }
+
+    // 提交后出现的「修改答案」是 .linkbtn：浮出淡底 + 字色加深
+    click(q('[data-act="submit"]'));
+    var mod = q('.linkbtn');
+    if (mod) {
+      var mb = hoverMeasure(mod);
+      ok('「修改答案」默认透明底', mb.before.bg === 'rgba(0, 0, 0, 0)', mb.before.bg);
+      eq('「修改答案」悬停浮出 --bg-2 淡底', mb.after.bg, appVar('--bg-2'));
+      eq('「修改答案」悬停字色变深到 --ink', mb.after.color, appVar('--ink'));
+      eq('「修改答案」悬停不位移', mb.after.rect, mb.before.rect);
+    }
+
+    // 交卷确认框（用户报的那个）：取消浮出淡底、确定交卷变亮
+    click(q('#btnFinish'));
+    eq('交卷确认框打开', !!q('[data-modal-confirm]'), true);
+    var cCancel = q('.modal__actions .btn:not(.btn--primary)');
+    var cc = hoverMeasure(cCancel);
+    eq('确认框「取消」悬停浮出 --bg-2 淡底', cc.after.bg, appVar('--bg-2'));
+    eq('确认框「取消」悬停字色变深到 --ink', cc.after.color, appVar('--ink'));
+    eq('确认框「取消」悬停阴影 3/6 档', cc.after.shadow, SH_XS_LIGHT);
+    eq('确认框「取消」悬停不位移', cc.after.rect, cc.before.rect);
+    var cOk = q('[data-modal-confirm]');
+    var ck = hoverMeasure(cOk);
+    eq('确认框「确定交卷」悬停背景亮一档', ck.after.bg, appVar('--accent-hover'));
+    eq('确认框「确定交卷」悬停阴影 6/12 档', ck.after.shadow, SH_HOVER_LIGHT);
+    eq('确认框「确定交卷」悬停不位移', ck.after.rect, ck.before.rect);
+    click(cOk);
+    eq('确定交卷后进入结果页', !!q('.page--result'), true);
+
+    // 结果页：次要按钮（复制成绩）/ 主按钮（再练一遍）/ 行尾「查看」
+    var quiet = q('.btn--quiet:not([disabled])');
+    if (quiet) {
+      var qb = hoverMeasure(quiet);
+      ok('结果页次要按钮默认 4/8 档', qb.before.shadow === SH_SM_LIGHT, qb.before.shadow);
+      eq('结果页次要按钮悬停浮出 --bg-2 淡底', qb.after.bg, appVar('--bg-2'));
+      eq('结果页次要按钮悬停阴影仍 4/8', qb.after.shadow, SH_SM_LIGHT);
+      eq('结果页次要按钮悬停不位移', qb.after.rect, qb.before.rect);
+    }
+    var rGhost = q('.btn--ghost[data-goto]');
+    if (rGhost) {
+      var rg = hoverMeasure(rGhost);
+      eq('结果页「查看」悬停浮出 --bg-2 淡底', rg.after.bg, appVar('--bg-2'));
+      eq('结果页「查看」悬停字色变深到 --ink', rg.after.color, appVar('--ink'));
+      eq('结果页「查看」悬停不位移', rg.after.rect, rg.before.rect);
+    }
+    // 回到列表：这一轮已交卷，三个入口这次是有数的（练习记录 1 / 错题本 1 / 收藏 0）
+    click(q('#btnBack'));
+    // 交卷后回列表
+    eq('交卷后回列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    var allRecent = q('.recent__all');
+    if (allRecent) {
+      var ar = hoverMeasure(allRecent);
+      eq('「全部记录」悬停浮出 --bg-2 淡底', ar.after.bg, appVar('--bg-2'));
+      eq('「全部记录」悬停不位移', ar.after.rect, ar.before.rect);
+    }
+
+    // 小控件：顶栏 40px 的夜间按钮固定在 4/8，不跟着长到 6/12
+    hoverChecks('顶栏控件', q('#btnTheme'), SH_SM_LIGHT);
+
+    // 悬停态不能留下痕迹
+    eq('量完不留镜像类', document.querySelectorAll('.state-hover').length, 0);
+
+    // 深色模式：卡片掉一整档、模态次要按钮同样浮出暗色 --bg-2
+    window.QuizTheme.apply(window.QuizTheme.save('dark'));
+    hoverChecks('深色下题库卡片', q('.card--clickable'), SH_SM_DARK);
+    click(q('.card--clickable'));
+    eq('深色下开始面板打开', !!q('[data-act="start-round"]'), true);
+    var dc = hoverMeasure(q('.modal__actions .btn:not(.btn--primary)'));
+    eq('深色下模态次要按钮悬停浮出 --bg-2', dc.after.bg, appVar('--bg-2'));
+    eq('深色下模态次要按钮悬停阴影 3/6 档', dc.after.shadow, SH_XS_DARK);
+    click(q('.modal__actions .btn:not(.btn--primary)'));
+    // 入口悬停本来就改底色与字色，所以这里只单独量阴影与底色
+    (function () {
+      var dm = hoverMeasure(q('.btn--mini:not([disabled])'));
+      eq('深色下一行入口悬停阴影 3/6 档', dm.after.shadow, SH_XS_DARK);
+      eq('深色下一行入口悬停浮出 --bg-2 淡底', dm.after.bg, appVar('--bg-2'));
+      ok('深色下 --bg-2 与 --bg 确实有差（看得出底色变化）',
+        appVar('--bg-2') !== appVar('--bg'), appVar('--bg') + ' vs ' + appVar('--bg-2'));
+    })();
+    window.QuizTheme.apply(window.QuizTheme.save('light'));
+    eq('测完深色回到亮色', document.documentElement.getAttribute('data-theme'), 'light');
+
+    // 首页三入口是「导航型」元素：悬停浮出 --bg-2 淡底 + 字色变深到 --ink，
+    // 阴影再从 4/8 收到 3/6；位置、尺寸、圆角一律不动（小控件不跟着变大）。
+    var mini = q('.btn--mini:not([disabled])');
+    if (mini) {
+      var mh = hoverMeasure(mini);
+      eq('一行入口悬停阴影 3/6 档', mh.after.shadow, SH_XS_LIGHT);
+      eq('一行入口悬停不位移', mh.after.rect, mh.before.rect);
+      eq('一行入口悬停浮出 --bg-2 淡底', mh.after.bg, appVar('--bg-2'));
+      ok('一行入口默认底色是透明的', mh.before.bg === 'rgba(0, 0, 0, 0)', mh.before.bg);
+      eq('一行入口悬停不改圆角', mh.after.radius, mh.before.radius);
+      ok('一行入口悬停文字变深到 --ink', mh.after.color === appVar('--ink'),
+        mh.before.color + ' → ' + mh.after.color);
+      eq('一行入口悬停不加 transform', mh.after.transform, 'none');
+      ok('一行入口默认是 4/8 档', mh.before.shadow === SH_SM_LIGHT, mh.before.shadow);
+    }
+    // 三个入口同在一行、规则相同：逐个套镜像类确认底色一起浮出来。
+    // 只量可用的那几个 —— n=0 的那几枚本来就压着 transparent（下面单独断言）。
+    (function () {
+      var host = mini ? mini.parentNode : null;
+      var btns = host ? Array.prototype.slice.call(host.querySelectorAll('.btn--mini:not([disabled])')) : [];
+      ok('入口行里至少有一枚可用', btns.length >= 1, '可用 ' + btns.length + ' 枚');
+      var bgs = btns.map(function (b) { return hoverMeasure(b).after.bg; });
+      ok('可用的入口悬停时一起浮出淡底',
+        bgs.every(function (c) { return c === appVar('--bg-2'); }), bgs.join('|'));
+    })();
+    // 图标用 stroke="currentColor" 描边：跟文字同一个 color，所以会一起变深
+    (function () {
+      var icon = mini ? mini.querySelector('.mini-ico') : null;
+      if (!icon) { ok('入口带内联图标', false); return; }
+      var idle = getComputedStyle(icon).color;
+      mini.classList.add('state-hover');
+      var hot = getComputedStyle(icon).color;
+      mini.classList.remove('state-hover');
+      ok('入口图标跟着字色一起变深', idle !== hot && hot === appVar('--ink'),
+        idle + ' → ' + hot);
+    })();
+    // 禁用态（n=0）不响应悬停：阴影、字色、底色、不透明度全都不变
+    var off = q('.btn--mini[disabled]');
+    if (off) {
+      var oh = hoverMeasure(off);
+      eq('禁用入口悬停无变化（阴影）', oh.after.shadow, oh.before.shadow);
+      eq('禁用入口悬停无变化（字色）', oh.after.color, oh.before.color);
+      eq('禁用入口悬停无变化（底色）', oh.after.bg, oh.before.bg);
+      ok('禁用入口悬停底色仍是透明的', oh.after.bg === 'rgba(0, 0, 0, 0)', oh.after.bg);
+      eq('禁用入口悬停无变化（不透明度）',
+        getComputedStyle(off).opacity, '0.5');
+    }
+
+    // 清完存储后列表 DOM 还是旧的（本用例结束在列表页），进一轮再退出让它重画成空态
+    clearQuizStorage();
+    openBank('web');
+    leaveQuiz();
+    eq('悬停检查结束回到列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    restoreTransitions();
+  }
+
+  function runFeedbackChecks() {
+    var Copy = window.QuizCopy;
+    var Feed = window.QuizFeedback;
+
+    log('--- 题目反馈：入口（首页）---');
+    clearQuizStorage();
+    ensureList();
+    eq('首页有「反馈箱」入口', !!q('[data-act="feedback-box"]'), true);
+    eq('首页有「维护日志」入口', !!q('[data-act="changelog"]'), true);
+    eq('没有反馈时不带角标', text('[data-act="feedback-box"]'), Copy.FB_BOX_TITLE);
+
+    log('--- 反馈箱：空状态 ---');
+    click(q('[data-act="feedback-box"]'));
+    eq('进入反馈箱', text('.h1'), Copy.FB_BOX_TITLE);
+    eq('空状态文案', appText().indexOf(Copy.FB_BOX_EMPTY) >= 0, true);
+    eq('空箱不显示「全部复制」', !!q('[data-act="fb-copy-all"]'), false);
+    ensureList();
+    eq('回到题库列表', text('.h1'), Copy.LIST_TITLE);
+
+    log('--- 维护日志 ---');
+    click(q('[data-act="changelog"]'));
+    eq('进入维护日志', text('.h1'), Copy.CHANGELOG_TITLE);
+    var clItems = qa('.cl-item');
+    eq('维护日志条目数 = 数据条数', clItems.length, (window.QUIZ_CHANGELOG || []).length);
+    ok('维护日志有足够的历史记录（>= 8 条）', clItems.length >= 8, 'got ' + clItems.length);
+    var dates = qa('.cl-item .num').map(function (e) { return e.textContent.trim(); });
+    var desc = true;
+    for (var di = 1; di < dates.length; di++) if (dates[di] > dates[di - 1]) desc = false;
+    eq('维护日志按日期倒序', desc, true);
+    ok('第一条是最近的记录（新功能在最上面）',
+      clItems[0].textContent.indexOf((window.QUIZ_CHANGELOG || [])[0].title) >= 0);
+    ok('日志条目带类型标签',
+      ['题库修正', '功能更新', '样式调整'].indexOf(
+        (q('.cl-item .badge') || { textContent: '' }).textContent.trim()) >= 0);
+    ensureList();
+
+    log('--- 答题页：反馈入口与面板定位信息 ---');
+    openBank('web', 'all');
+    eq('进入答题页', !!q('.meta'), true);
+    eq('答题页有反馈入口', !!q('.fb-link'), true);
+    var metaBefore = meta();
+    var idxBefore = currentIndex();
+    var q0 = currentData();
+    eq('点反馈打开面板', openFeedbackOnCurrent(), true);
+    eq('面板标题', text('#modalTitle'), Copy.FB_PANEL_TITLE);
+    var vals = fbInfoValues();
+    eq('定位信息 8 行', vals.length, 8);
+    eq('面板题库名', vals[0], 'Web前端题库');
+    eq('面板题号', vals[1], '第 ' + q0.id + ' 题');
+    eq('面板题型', vals[2], Copy.TYPE_NAME(q0.type));
+    eq('面板题干摘要（前 40 字）', vals[3], Feed.summary(q0.stem));
+    eq('面板我的选择（还没作答）', vals[4], Copy.FB_NONE);
+    eq('面板当前答案', vals[5], (q0.answer || []).join('、'));
+    eq('面板页面 = 答题页', vals[6], Copy.FB_PAGE_NAME('quiz'));
+    ok('面板时间形如 2026-10-17 14:02', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(vals[7]), vals[7]);
+
+    log('--- 面板：问题类型单选 + 备注 ---');
+    var kinds = qa('[data-fb-kind]');
+    eq('五种问题类型', kinds.length, 5);
+    eq('类型文案', kinds.map(function (e) { return e.textContent.trim(); }), ['题干有误', '选项有误', '答案有误', '解析有误', '其他']);
+    eq('默认选中「题干有误」', kinds[0].getAttribute('aria-pressed'), 'true');
+    eq('默认只选中一个', qa('[data-fb-kind][aria-pressed="true"]').length, 1);
+    click(q('[data-fb-kind="answer"]'));
+    eq('切到「答案有误」', q('[data-fb-kind="answer"]').getAttribute('aria-pressed'), 'true');
+    eq('「题干有误」取消选中', q('[data-fb-kind="stem"]').getAttribute('aria-pressed'), 'false');
+    var csOn = getComputedStyle(q('[data-fb-kind="answer"]'));
+    var csOff = getComputedStyle(q('[data-fb-kind="stem"]'));
+    ok('选中的类型看得出来（颜色或阴影与未选中不同）',
+      csOn.color !== csOff.color || csOn.boxShadow !== csOff.boxShadow);
+
+    var noteEl = q('[data-fb-note]');
+    eq('备注框有 200 字上限', noteEl.getAttribute('maxlength'), String(Feed.NOTE_MAX));
+    noteEl.value = new Array(211).join('备'); // 210 字，超过上限
+    noteEl.dispatchEvent(new Event('input', { bubbles: true }));
+    eq('备注计数按上限截断', text('[data-fb-count]'), Copy.FB_NOTE_COUNT(Feed.NOTE_MAX, Feed.NOTE_MAX));
+    noteEl.value = '这里写一句说明';
+    noteEl.dispatchEvent(new Event('input', { bubbles: true }));
+    eq('备注计数跟着输入', text('[data-fb-count]'), '7 / 200');
+
+    log('--- 提交 → 已记录（仅本设备）---');
+    click(q('[data-act="fb-submit"]'));
+    eq('写入反馈箱 1 条', fbItems().length, 1);
+    eq('面板显示已记录', panelText().indexOf(Copy.FB_SAVED) >= 0, true);
+    eq('面板给出「复制这条反馈」', !!q('[data-act="fb-copy-one"]'), true);
+    var rec0 = fbItems()[0];
+    eq('记录题库', rec0.bankKey, 'web');
+    eq('记录题号', rec0.questionId, q0.id);
+    eq('记录类型', rec0.kind, 'answer');
+    eq('记录备注', rec0.note, '这里写一句说明');
+    eq('记录页面', rec0.page, 'quiz');
+    eq('记录状态待上报', rec0.status, 'pending');
+    eq('记录题干摘要 ≤ 40 字（超长加省略号）',
+      rec0.stem === Feed.summary(q0.stem) && rec0.stem.length <= Feed.STEM_MAX + 1, true);
+
+    log('--- 复制文本格式 ---');
+    var txt = Copy.FB_TEXT(rec0);
+    var linesTxt = txt.split('\n');
+    eq('复制文本 6 行', linesTxt.length, 6);
+    ok('第 1 行标题带题库与题号',
+      /^【题库纠错】Web前端题库 · 第 \d+ 题（单选题）$/.test(linesTxt[0]), linesTxt[0]);
+    eq('第 2 行问题类型', linesTxt[1], '类型：答案有误');
+    ok('第 3 行我的选择与当前答案',
+      /^我的选择：未作答 ｜ 当前答案：[A-D]$/.test(linesTxt[2]), linesTxt[2]);
+    ok('第 4 行题干', linesTxt[3].indexOf('题干：') === 0, linesTxt[3]);
+    eq('第 5 行说明', linesTxt[4], '说明：这里写一句说明');
+    ok('第 6 行页面与时间',
+      /^页面：答题页 ｜ 时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(linesTxt[5]), linesTxt[5]);
+
+    log('--- 复制这条反馈 ---');
+    click(q('[data-act="fb-copy-one"]'));
+    eq('状态变为已复制', fbItems()[0].status, 'copied');
+    eq('复制提示', panelText().indexOf(Copy.FB_COPIED_HINT) >= 0, true);
+    eq('复制出去的文本与格式一致', window.QuizApp.feedback().lastCopied, txt);
+
+    log('--- Esc 关闭面板，答题进度不受影响 ---');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    eq('面板已关闭', fbPanelOpen(), false);
+    eq('仍停在同一题', currentIndex(), idxBefore);
+    eq('进度行没有变化', meta(), metaBefore);
+    eq('反馈箱仍然只有 1 条', fbItems().length, 1);
+
+    log('--- 答错一题 → 交卷 → 结果页错题行也有反馈入口 ---');
+    pickWrong();
+    submitNow();
+    finishNow();
+    eq('进入结果页', text('.h1'), Copy.RESULT_TITLE);
+    var rowLinks = qa('.row .fb-link');
+    ok('错题行有反馈入口', rowLinks.length >= 1, 'got ' + rowLinks.length);
+    // 只有错题行有入口；未作答行不提供（题目都没做，先去做题）
+    eq('错题行数 = 反馈入口数', rowLinks.length, window.QuizApp.session().stats().wrong);
+    click(rowLinks[0]);
+    eq('结果页能打开反馈面板', fbPanelOpen(), true);
+    eq('面板页面 = 结果页', fbInfoValues()[6], Copy.FB_PAGE_NAME('result'));
+    click(q('[data-act="fb-submit"]'));
+    eq('反馈箱 2 条', fbItems().length, 2);
+    eq('结果页那条记录 page=result', fbItems()[0].page, 'result');
+    eq('结果页那条带我的选择', fbItems()[0].picked.length > 0, true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    eq('关闭结果页反馈面板', fbPanelOpen(), false);
+
+    log('--- 首页角标 + 反馈箱列表 ---');
+    ensureList();
+    eq('首页角标显示待上报条数', text('[data-act="feedback-box"]'), Copy.FB_BOX_ENTRY(1));
+    click(q('[data-act="feedback-box"]'));
+    eq('反馈箱 2 行', qa('.fb-card').length, 2);
+    var cards = qa('.fb-card');
+    ok('倒序：结果页那条在上面', cards[0].textContent.indexOf(Copy.FB_PAGE_NAME('result')) >= 0 ||
+      cards[0].textContent.indexOf(fbItems()[0].stem) >= 0);
+    eq('行内状态为待上报', cards[0].textContent.indexOf(Copy.FB_STATUS_PENDING) >= 0, true);
+    ok('行内带题库与题号', cards[0].textContent.indexOf('Web前端题库 · 第 ') >= 0);
+    ok('行内带题干摘要', cards[0].textContent.indexOf(fbItems()[0].stem) >= 0);
+    eq('全部复制入口显示条数', text('[data-act="fb-copy-all"]'), Copy.FB_COPY_ALL(2));
+
+    log('--- 单条复制 / 全部复制 / 删除 / 清空 ---');
+    var secondBefore = fbItems()[1].status;
+    click(qa('[data-fb-copy]')[0]);
+    eq('单条复制后变已复制', fbItems()[0].status, 'copied');
+    eq('另一条状态不受影响', fbItems()[1].status, secondBefore);
+    click(q('[data-act="fb-copy-all"]'));
+    eq('全部复制后都是已复制',
+      fbItems().map(function (x) { return x.status; }), ['copied', 'copied']);
+    eq('全部复制后的文本是两条拼起来', window.QuizApp.feedback().lastCopied.split('\n\n').length, 2);
+    eq('列表页角标随待上报清零', (function () {
+      var n = 0;
+      var arr = fbItems();
+      for (var i = 0; i < arr.length; i++) if (arr[i].status === 'pending') n++;
+      return n;
+    })(), 0);
+    var beforeDel = fbItems().length;
+    click(qa('[data-fb-del]')[0]);
+    eq('删除单条生效', fbItems().length, beforeDel - 1);
+    eq('删除后页面上少一行', qa('.fb-card').length, beforeDel - 1);
+
+    log('--- 清空（二次确认）---');
+    click(q('[data-act="fb-clear"]'));
+    eq('清空前先弹确认框', !!q('[data-modal-confirm]'), true);
+    ok('确认文案说清「无法恢复」', panelText().indexOf('无法恢复') >= 0, panelText());
+    click(q('[data-modal-confirm]'));
+    eq('清空后 0 条', fbItems().length, 0);
+    eq('清空后显示空状态', appText().indexOf(Copy.FB_BOX_EMPTY) >= 0, true);
+
+    log('--- 坏数据不崩 ---');
+    localStorage.setItem('quiz:feedback', '{这不是 JSON');
+    click(q('[data-act="back"]'));
+    eq('坏数据时首页不崩', text('.h1'), Copy.LIST_TITLE);
+    click(q('[data-act="feedback-box"]'));
+    eq('坏数据当成空箱', appText().indexOf(Copy.FB_BOX_EMPTY) >= 0, true);
+    eq('坏数据下不报错、不显示行', qa('.fb-card').length, 0);
+    localStorage.removeItem('quiz:feedback');
+
+    log('--- 留一条待上报，停在反馈箱（供 #feedback-check 刷新验证）---');
+    ensureList();
+    openBank('java', 'all');
+    eq('进入 Java 答题页', !!q('.meta'), true);
+    eq('Java 答题页也有反馈入口', openFeedbackOnCurrent(), true);
+    click(q('[data-act="fb-submit"]'));
+    eq('写入了 1 条', fbItems().length, 1);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    leaveQuiz();
+    ensureList();
+    eq('首页角标 = 1', text('[data-act="feedback-box"]'), Copy.FB_BOX_ENTRY(1));
+    click(q('[data-act="feedback-box"]'));
+    eq('停在反馈箱页', text('.h1'), Copy.FB_BOX_TITLE);
+    eq('只有 1 行', qa('.fb-card').length, 1);
+  }
+
+  function runFeedbackRefreshCheck() {
+    var Copy = window.QuizCopy;
+    var Feed = window.QuizFeedback;
+    log('--- 反馈箱：刷新后 ---');
+    eq('刷新后仍停在反馈箱', text('.h1'), Copy.FB_BOX_TITLE);
+    eq('刷新后条数不变', qa('.fb-card').length, 1);
+    eq('刷新后状态仍是待上报', appText().indexOf(Copy.FB_STATUS_PENDING) >= 0, true);
+    var items = Feed.list(null);
+    eq('刷新后数据还在', items.length, 1);
+    eq('刷新后题库名还在', items[0].bankTitle, 'Java程序设计题库');
+    eq('刷新后复制文本仍完整', Copy.FB_TEXT(items[0]).split('\n').length, 6);
+    ok('刷新后文本能直接贴出去',
+      Copy.FB_TEXT(items[0]).indexOf('【题库纠错】Java程序设计题库 · 第 ') === 0);
+    click(q('[data-act="back"]'));
+    eq('回得到题库列表', text('.h1'), Copy.LIST_TITLE);
+    eq('刷新后首页角标仍是 1', text('[data-act="feedback-box"]'), Copy.FB_BOX_ENTRY(1));
+    eq('刷新后维护日志入口还在', !!q('[data-act="changelog"]'), true);
+  }
+
+  /* ================= 夜间模式（主题） ================= */
+  var THEME_BG_LIGHT = 'rgb(224, 229, 236)';
+  var THEME_BG_DARK = 'rgb(47, 51, 57)';
+  var THEME_INK_DARK = 'rgb(232, 235, 240)';
+
+  function themeOf() {
+    return document.documentElement.getAttribute('data-theme');
+  }
+
+  /** 用户选的三态：system | light | dark（解析后的明暗在 data-theme 上） */
+  function themeMode() {
+    return document.documentElement.getAttribute('data-theme-mode');
+  }
+
+  function themeBtn() { return q('#btnTheme'); }
+
+  function themeBtnText() { return themeBtn() ? themeBtn().textContent.trim() : ''; }
+
+  function themeMenu() { return q('#themeMenu'); }
+
+  function themeMenuOpen() { return !!themeMenu() && !themeMenu().hasAttribute('hidden'); }
+
+  /** 打开菜单并返回三个选项按钮 */
+  function openThemeMenu() {
+    click(themeBtn());
+    return qa('[data-theme-pick]');
+  }
+
+  /** 直接选某个模式（打开菜单 → 点那一项） */
+  function pickTheme(mode) {
+    var items = openThemeMenu();
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute('data-theme-pick') === mode) {
+        click(items[i]);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function themeMenuLabels() {
+    return qa('[data-theme-pick]').map(function (b) { return b.textContent.replace(/[\u2713\u2714]/g, '').trim(); });
+  }
+
+  function themeMenuChecked() {
+    var out = [];
+    qa('[data-theme-pick]').forEach(function (b) {
+      if (b.getAttribute('aria-checked') === 'true') out.push(b.getAttribute('data-theme-pick'));
+    });
+    return out;
+  }
+
+  function bodyBg() { return getComputedStyle(document.body).backgroundColor; }
+
+  function cssProp(sel, prop) {
+    var e = q(sel);
+    return e ? getComputedStyle(e)[prop] : '';
+  }
+
+  function themeStored() {
+    var raw = localStorage.getItem(window.QuizTheme.KEY);
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return 'BAD'; }
+  }
+
+  function rgbList(color) {
+    var m = String(color).match(/\d+(\.\d+)?/g) || [];
+    return [Number(m[0]) || 0, Number(m[1]) || 0, Number(m[2]) || 0];
+  }
+
+  function luminance(color) {
+    var c = rgbList(color).map(function (v) {
+      v = v / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+
+  function contrastRatio(a, b) {
+    var l1 = luminance(a);
+    var l2 = luminance(b);
+    var hi = Math.max(l1, l2);
+    var lo = Math.min(l1, l2);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  // 顶栏在窄屏下能不能放下（标题可以省略号截断，但按钮不许溢出）
+  function topbarFitsAt(width) {
+    var inner = q('.topbar__inner');
+    if (!inner) return false;
+    var prev = inner.style.width;
+    inner.style.width = width + 'px';
+    var fits = inner.scrollWidth <= width + 1;
+    inner.style.width = prev;
+    return fits;
+  }
+
+  // 深色下「背景深 + 文字浅」的通用检查
+  function darkSurface(name, sel) {
+    eq(name + '：背景是深色底', cssProp(sel, 'backgroundColor'), THEME_BG_DARK);
+  }
+
+  /**
+   * 组件上有 300ms 的颜色过渡（--transition 里带 background-color），
+   * 切换主题后立刻读 computedStyle 会读到过渡起点。断言的是「最终配色」，
+   * 所以量颜色前先把过渡关掉，量完再打开（页面本身不动）。
+   */
+  function noTransitions() {
+    if (document.getElementById('e2e-no-transition')) return;
+    var s = document.createElement('style');
+    s.id = 'e2e-no-transition';
+    s.textContent = '*, *::before, *::after { transition: none !important }';
+    document.head.appendChild(s);
+  }
+
+  function restoreTransitions() {
+    var s = document.getElementById('e2e-no-transition');
+    if (s && s.parentNode) s.parentNode.removeChild(s);
+  }
+
+  /* ================= 自定义随机题数 ================= */
+  function countInput() { return q('[data-scope-n-input]'); }
+  function typeCount(v) {
+    var el = countInput();
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return el;
+  }
+
+  function runCountChecks() {
+    var Copy = window.QuizCopy;
+    var web = window.WEB_BANK;
+    log('--- 自定义随机题数 ---');
+    resetQuizStorageFromList();
+    ensureList();
+    click(q('[data-bank="web"]'));
+    ok('打开「开始一轮」面板', panelOpen());
+    chooseScope('random');
+    eq('随机区默认填 10', countInput().value, '10');
+    eq('默认高亮 10 档', q('[data-scope-n="10"]').getAttribute('aria-pressed'), 'true');
+    eq('默认可以开始', startBtn().disabled, false);
+    eq('默认不显示提示', q('[data-start-hint]').hidden, true);
+
+    typeCount('7');
+    eq('手动输入 7：10 档不再高亮', q('[data-scope-n="10"]').getAttribute('aria-pressed'), 'false');
+    eq('手动输入 7：开始可用', startBtn().disabled, false);
+    eq('手动输入 7：不提示', q('[data-start-hint]').hidden, true);
+    typeCount('7a');
+    eq('非数字被过滤（7a → 7）', countInput().value, '7');
+
+    typeCount('0');
+    eq('输入 0：开始禁用', startBtn().disabled, true);
+    eq('输入 0：aria-disabled 也是 true', startBtn().getAttribute('aria-disabled'), 'true');
+    eq('输入 0：提示区间', text('[data-start-hint]'), Copy.SCOPE_COUNT_INVALID(web.questions.length));
+    typeCount('');
+    eq('空输入：开始禁用', startBtn().disabled, true);
+    eq('空输入：提示区间', text('[data-start-hint]'), Copy.SCOPE_COUNT_INVALID(web.questions.length));
+    typeCount('999');
+    eq('超过题库题数：开始禁用', startBtn().disabled, true);
+    eq('超过题库题数：提示题库总量', text('[data-start-hint]'), Copy.SCOPE_COUNT_OVER(web.questions.length));
+
+    click(q('[data-scope-n="20"]'));
+    eq('点 20 档：输入框跟着变成 20', countInput().value, '20');
+    eq('点 20 档：该档高亮', q('[data-scope-n="20"]').getAttribute('aria-pressed'), 'true');
+    eq('点 20 档：开始可用', startBtn().disabled, false);
+
+    typeCount('7');
+    click(startBtn());
+    eq('按 7 题开始：本轮 7 题', totalOfCurrentRound(), 7);
+    eq('范围徽标是「随机 7 题」', firstChipsText(), '随机 7 题');
+    var st = roundState();
+    eq('scope 仍是 {type:random,n:7}', JSON.stringify(st.scope),
+      JSON.stringify({ type: 'random', chapterNos: [], n: 7 }));
+    eq('一共给了 7 个题号', st.ids.length, 7);
+    var uniqN = {};
+    for (var ci = 0; ci < st.ids.length; ci++) uniqN[st.ids[ci]] = 1;
+    eq('7 个题号没有重复', Object.keys(uniqN).length, 7);
+
+    // 做一题让这一轮真正落盘（没作答的一轮不算「进行中」），再离开 / 回来「继续」
+    pickCorrect();
+    submitNow();
+    var stored = JSON.parse(localStorage.getItem('quiz:progress:web') || 'null');
+    ok('题号与范围已落盘', !!(stored && stored.questionIds && stored.scope),
+      stored && JSON.stringify({ ids: stored.questionIds.length, scope: stored.scope }));
+    eq('落盘的题号与当前一致', JSON.stringify(stored.questionIds), JSON.stringify(st.ids));
+    eq('落盘的范围是随机 7 题', stored.scope, { type: 'random', chapterNos: [], n: 7 });
+    var reread = new window.QuizSession.Session(web, {});
+    eq('重新读回（刷新所走的路径）：题号不变', JSON.stringify(reread.questionIds), JSON.stringify(st.ids));
+    eq('重新读回（刷新所走的路径）：范围不变', reread.scope, { type: 'random', chapterNos: [], n: 7 });
+
+    click(q('#btnBack'));
+    eq('回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+    click(q('[data-bank="web"]'));
+    ok('面板给出「继续」', !!q('[data-act="continue"]'));
+    click(q('[data-act="continue"]'));
+    eq('继续同一轮：题号一点没变', JSON.stringify(roundState().ids), JSON.stringify(st.ids));
+    eq('继续同一轮：范围徽标仍是「随机 7 题」', firstChipsText(), '随机 7 题');
+  }
+
+  /* ================= 顶栏「返回」：显示范围 + 按层级返回 ================= */
+  function runBackChecks() {
+    log('--- 顶栏「返回」：答题页 / 结果页 ---');
+    backToList();
+    resetQuizStorageFromList();
+    ensureList();
+    eq('题库列表不显示顶栏返回', q('#btnBack').hidden, true);
+    openBank('web', 'all');
+    ok('进入答题页', !!q('.actionbar'));
+    eq('答题页顶栏返回可见', q('#btnBack').hidden, false);
+    answerOne();                                  // 1 对
+    click(q('[data-act="next"]'));
+    pickWrongSkippingInvalid();                   // 1 错，让错题本有内容可进
+    submitNow();
+    finishNow();
+    eq('交卷后进入结果页', text('.h1'), '答题结果');
+    eq('结果页顶栏返回可见', q('#btnBack').hidden, false);
+    var r = q('#btnBack').getBoundingClientRect();
+    ok('不滚动也在首屏（sticky 顶栏里）', r.top >= 0 && r.bottom <= window.innerHeight,
+      'top=' + Math.round(r.top) + ' bottom=' + Math.round(r.bottom) + ' vh=' + window.innerHeight);
+    ok('底部「返回题库列表」也还在', !!q('[data-act="back"]'));
+    click(q('#btnBack'));
+    eq('刚交卷的结果页：顶栏返回回题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    log('--- 顶栏「返回」：记录 → 快照 → 记录（按层级）---');
+    click(q('[data-records="web"]'));
+    eq('进入练习记录页', text('.h1'), '练习记录');
+    eq('练习记录页顶栏返回可见', q('#btnBack').hidden, false);
+    // 键盘可达 + 焦点可见（焦点环走 styles.css 的统一 token，不在这里另写一套）
+    var bb = q('#btnBack');
+    ok('顶栏返回是原生 button 且可 Tab 聚焦', bb.tagName === 'BUTTON' && bb.tabIndex >= 0 && !bb.disabled,
+      bb.tagName + ' tabIndex=' + bb.tabIndex + ' disabled=' + bb.disabled);
+    var firstFocusable = qa('.topbar__inner')[0].querySelector(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    eq('顶栏里第一个可聚焦元素就是「返回」（Tab 顺序在最左）', firstFocusable && firstFocusable.id, 'btnBack');
+    var ring = getComputedStyle(document.documentElement).getPropertyValue('--sh-focus').trim();
+    ok('焦点环沿用统一 token --sh-focus（0 0 0 3px…）', /0\s+0\s+0\s+3px/.test(ring) && ring.length > 0, ring);
+    // 二级页面在窄屏下同样不许横向溢出（按钮不折行、站名可省略）
+    ok('练习记录页 375px 顶栏放得下', topbarFitsAt(375));
+    ok('练习记录页 320px 顶栏放得下', topbarFitsAt(320));
+    ok('练习记录里有记录', !!q('[data-record]'));
+    click(q('[data-record]'));
+    eq('打开历史轮次', text('.h1'), '答题结果');
+    eq('历史轮次也有顶栏返回', q('#btnBack').hidden, false);
+    click(q('#btnBack'));
+    eq('从记录进的快照：返回到练习记录（不是列表）', text('.h1'), '练习记录');
+    click(q('#btnBack'));
+    eq('练习记录：顶栏返回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    log('--- 顶栏「返回」：错题本 / 反馈箱 / 维护日志 ---');
+    ok('这一轮有一道判错的题（错题本才有内容）',
+      wbEntry('web') && wbEntry('web').textContent.trim() !== '错题本（0）',
+      wbEntry('web') ? wbEntry('web').textContent.trim() : '(没有入口)');
+    click(q('[data-wrongbook="web"]'));
+    eq('进入错题本页', text('.h1'), '错题本');
+    eq('错题本页顶栏返回可见', q('#btnBack').hidden, false);
+    eq('错题本里确实有错题', wbRows().length > 0, true);
+    click(q('#btnBack'));
+    eq('错题本：顶栏返回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    click(q('[data-act="feedback-box"]'));
+    eq('进入反馈箱', text('.h1'), window.QuizCopy.FB_BOX_TITLE);
+    eq('反馈箱顶栏返回可见', q('#btnBack').hidden, false);
+    click(q('#btnBack'));
+    eq('反馈箱：顶栏返回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    click(q('[data-act="changelog"]'));
+    eq('进入维护日志', text('.h1'), window.QuizCopy.CHANGELOG_TITLE);
+    eq('维护日志顶栏返回可见', q('#btnBack').hidden, false);
+    click(q('#btnBack'));
+    eq('维护日志：顶栏返回到题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+
+    log('--- 顶栏「返回」：练习记录里的进行中 → 继续答题 → 返回回列表 ---');
+    openBank('web', 'all');
+    answerOne();
+    click(q('#btnBack'));
+    click(q('[data-records="web"]'));
+    ok('记录页有进行中的一轮', !!activeRecordRow());
+    click(activeRecordRow());
+    ok('继续回到答题页', !!q('.actionbar'));
+    eq('从记录继续的答题页也有顶栏返回', q('#btnBack').hidden, false);
+    click(q('#btnBack'));
+    eq('答题页顶栏返回一律回题库列表', text('.h1'), window.QuizCopy.LIST_TITLE);
+  }
+
+  /* ================= 提交后修改答案 ================= */
+  function runModifyChecks() {
+    var Copy = window.QuizCopy;
+    log('--- 提交后修改答案 ---');
+    resetQuizStorageFromList();
+    ensureList();
+    openBank('web', 'all');
+    ok('进入答题页', !!q('.actionbar'));
+
+    ok('第一题故意选错', !!pickWrong());
+    submitNow();
+    ok('提交后出现「修改答案」', !!q('[data-act="modify"]'));
+    eq('「修改答案」文案', text('[data-act="modify"]'), Copy.BTN_MODIFY);
+    eq('判分结果是答错', text('.tip__title'), Copy.TIP_BAD);
+    var s1 = window.QuizApp.session().stats();
+    eq('判错计入统计（wrong=1）', s1.wrong, 1);
+
+    click(q('[data-act="modify"]'));
+    eq('解锁后选项恢复可选（没有变灰的选项）', qa('.opt--dimmed').length, 0);
+    eq('解锁后主按钮文字回到「提交」', text('[data-act="submit"]'), Copy.BTN_SUBMIT);
+    eq('解锁后主按钮可用', q('[data-act="submit"]').disabled, false);
+    eq('解锁后「修改答案」入口消失', q('[data-act="modify"]'), null);
+    eq('解锁后给出说明', text('.notice'), Copy.MODIFY_UNLOCKED);
+
+    pickCorrect();
+    submitNow();
+    var s2 = window.QuizApp.session().stats();
+    eq('改对后再提交：答对 1 题', s2.correct, 1);
+    eq('改对后再提交：答错清零（统计是从 answers 派生的）', s2.wrong, 0);
+    eq('改对后再提交：提示变成答对', text('.tip__title'), Copy.TIP_OK);
+    eq('改对后仍可再次修改', !!q('[data-act="modify"]'), true);
+
+    // 幂等：同一个选择连提 3 次，结果与分数都不变
+    var snapshot = JSON.stringify(window.QuizApp.session().stats());
+    click(q('[data-act="submit"]'));
+    click(q('[data-act="submit"]'));
+    click(q('[data-act="submit"]'));
+    eq('连提 3 次分数不变', JSON.stringify(window.QuizApp.session().stats()), snapshot);
+
+    // 数据异常题不可修改
+    goTo(31);
+    eq('数据异常题没有「修改答案」', q('[data-act="modify"]'), null);
+    eq('数据异常题的主按钮是「本题不计分」', text('[data-act="submit"]'), Copy.BTN_INVALID);
+    eq('数据异常题的主按钮禁用', q('[data-act="submit"]').disabled, true);
+
+    // 交卷后只读：结果页没有任何修改入口
+    finishNow();
+    eq('交卷后进入结果页', text('.h1'), '答题结果');
+    eq('结果页没有「修改答案」', q('[data-act="modify"]'), null);
+    ok('结果页只读', !!q('.muted--2') && q('[data-act="back"]') !== null);
+  }
+
+  /* 「跟随系统」在这一台机器上会解析成什么：无头 Chrome 的 prefers-color-scheme 不一定是浅色，
+     所以断言一律跟它比，而不是硬写 'light' */
+  function sysTheme() {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function runThemeChecks() {
+    var Copy = window.QuizCopy;
+    var Theme = window.QuizTheme;
+    log('--- 主题三态：默认值与菜单 ---');
+
+    clearQuizStorage();
+    // 存储清空后，内存里的模式也要回到「跟随系统」，才等于真的重开一次（否则断言读到的是上一轮留下的）
+    window.QuizTheme.apply(window.QuizTheme.SYSTEM);
+    ensureList();
+
+    eq('没选过时用的是「跟随系统」', themeMode(), 'system');
+    eq('解析结果跟着系统偏好', themeOf(), sysTheme());
+    ok('顶栏有主题入口', !!themeBtn());
+    eq('入口文字是「跟随」', themeBtnText(), Copy.THEME_SHORT_SYSTEM);
+    ok('入口带图标', !!themeBtn() && !!q('#btnTheme svg'));
+    eq('入口 aria-expanded=false', themeBtn().getAttribute('aria-expanded'), 'false');
+    eq('入口 aria-haspopup=menu', themeBtn().getAttribute('aria-haspopup'), 'menu');
+    eq('背景跟着解析结果', bodyBg(), sysTheme() === 'dark' ? THEME_BG_DARK : THEME_BG_LIGHT);
+    ok('菜单默认收着', !themeMenuOpen());
+
+    log('--- 主题三态：菜单本身 ---');
+    var items = openThemeMenu();
+    eq('菜单打开后有 3 个选项', items.length, 3);
+    eq('三个选项依次是 跟随系统 / 亮色 / 暗色', themeMenuLabels().join('|'),
+      [Copy.THEME_SYSTEM, Copy.THEME_LIGHT, Copy.THEME_DARK].join('|'));
+    eq('当前项有选中态（跟随系统）', themeMenuChecked().join(','), 'system');
+    eq('菜单项都是 menuitemradio', items[0].getAttribute('role'), 'menuitemradio');
+    eq('打开后 aria-expanded=true', themeBtn().getAttribute('aria-expanded'), 'true');
+    eq('打开后焦点落在当前项上', (document.activeElement || {}).getAttribute('data-theme-pick'), 'system');
+
+    // Esc 关闭
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    ok('Esc 关掉菜单', !themeMenuOpen());
+    eq('Esc 之后焦点回到入口', document.activeElement && document.activeElement.id, 'btnTheme');
+
+    // 点外部关闭
+    openThemeMenu();
+    click(q('.h1'));
+    ok('点页面空白处也能关掉菜单', !themeMenuOpen());
+
+    log('--- 主题三态：选亮色 ---');
+    noTransitions(); // 颜色断言量的是最终配色，不是 300ms 过渡的中间帧
+    var cardH = q('.card') ? q('.card').offsetHeight : 0;
+    var cardW = q('.card') ? q('.card').offsetWidth : 0;
+    var progressRaw = localStorage.getItem('quiz:progress:web');
+
+    ok('菜单里有「亮色」', pickTheme('light'));
+    eq('选亮色后生效', themeOf(), 'light');
+    eq('记录的三态是 light', themeMode(), 'light');
+    eq('按钮文字是「亮色」', themeBtnText(), Copy.THEME_SHORT_LIGHT);
+    eq('选完菜单自动收起', themeMenuOpen(), false);
+    eq('aria-expanded 回到 false', themeBtn().getAttribute('aria-expanded'), 'false');
+    eq('浅色背景', bodyBg(), THEME_BG_LIGHT);
+    eq('主题存进了 quiz:theme', themeStored() && themeStored().theme, 'light');
+    ok('主题存储键就是 quiz:theme', Theme.KEY === 'quiz:theme');
+
+    log('--- 主题三态：选暗色 ---');
+    ok('菜单里有「暗色」', pickTheme('dark'));
+    eq('选暗色后生效', themeOf(), 'dark');
+    eq('记录的三态是 dark', themeMode(), 'dark');
+    eq('按钮文字是「暗色」', themeBtnText(), Copy.THEME_SHORT_DARK);
+    eq('深色背景（#2f3339，不是纯黑）', bodyBg(), THEME_BG_DARK);
+    eq('深色主文字是浅灰白', cssProp('.h1', 'color'), THEME_INK_DARK);
+    ok('深色不是纯黑', bodyBg() !== 'rgb(0, 0, 0)', bodyBg());
+    ok('卡片尺寸不变（切换不跳布局）',
+      (!q('.card')) || (q('.card').offsetHeight === cardH && q('.card').offsetWidth === cardW),
+      'h ' + cardH + '→' + (q('.card') && q('.card').offsetHeight) + ' / w ' + cardW + '→' + (q('.card') && q('.card').offsetWidth));
+    eq('主题存进了 quiz:theme', themeStored() && themeStored().theme, 'dark');
+    eq('切换主题不动答题进度存储', localStorage.getItem('quiz:progress:web'), progressRaw);
+    ok('深色正文对比度 ≥ 4.5:1',
+      contrastRatio(cssProp('.h1', 'color'), bodyBg()) >= 4.5,
+      'ratio=' + contrastRatio(cssProp('.h1', 'color'), bodyBg()).toFixed(2));
+    ok('辅助文字对比度 ≥ 4.5:1',
+      contrastRatio(cssProp('.muted--2', 'color'), bodyBg()) >= 4.5,
+      'ratio=' + contrastRatio(cssProp('.muted--2', 'color'), bodyBg()).toFixed(2));
+    eq('原生控件也切到深色（color-scheme）', document.documentElement.style.colorScheme, 'dark');
+    eq('地址栏配色跟着变', (q('meta[name="theme-color"]') || {}).content, '#2f3339');
+
+    log('--- 夜间模式：各页面都跟着切 ---');
+    eq('列表页：背景深色', bodyBg(), THEME_BG_DARK);
+    darkSurface('列表页卡片', '.card--clickable');
+    eq('列表页：标题后半句在深色下换成亮一档的强调色',
+      cssProp('.hero__accent', 'color'), 'rgb(169, 155, 255)');
+    ok('列表页：标题前半句仍是正文浅色', cssProp('.hero__title', 'color') === THEME_INK_DARK,
+      cssProp('.hero__title', 'color'));
+    ok('列表页：Hero 在深色下仍不可选中', getComputedStyle(q('.hero')).userSelect === 'none',
+      getComputedStyle(q('.hero')).userSelect);
+
+    // 开始一轮面板
+    click(q('[data-bank="web"]'));
+    ok('打开「开始一轮」面板', !!q('.modal'));
+    darkSurface('开始面板', '.modal');
+    eq('开始面板：文字浅色', cssProp('.modal', 'color'), THEME_INK_DARK);
+    click(q('[data-modal-close]'));
+    ok('面板可以关掉', !q('.modal'));
+
+    // 答题页
+    click(q('[data-bank="web"]'));
+    click(startBtn());
+    ok('进入答题页', !!q('.actionbar'));
+    darkSurface('答题页卡片', '.card');
+    darkSurface('答题页选项', '.opt');
+    eq('答题页：正文浅色', cssProp('.rich', 'color'), THEME_INK_DARK);
+    // 提交按钮还没选答案 → 禁用：禁用态必须是中性底，不能亮着强调色
+    ok('答题页：禁用中的提交按钮不亮着（中性底，不是强调色）',
+      cssProp('[data-act="submit"]', 'backgroundColor') !== 'rgb(109, 93, 252)',
+      'bg=' + cssProp('[data-act="submit"]', 'backgroundColor'));
+    // 选了答案才能量「强调色上的白字」
+    click(q('[data-opt="A"]'));
+    eq('答题页：强调按钮上是白字（不是深灰）', cssProp('.actionbar .btn--primary', 'color'), 'rgb(255, 255, 255)');
+    ok('答题页：强调按钮对比度 ≥ 4.5:1',
+      contrastRatio(cssProp('.actionbar .btn--primary', 'color'),
+        cssProp('.actionbar .btn--primary', 'backgroundColor')) >= 4.5,
+      'ratio=' + contrastRatio(cssProp('.actionbar .btn--primary', 'color'),
+        cssProp('.actionbar .btn--primary', 'backgroundColor')).toFixed(2));
+    eq('答题页：题型徽标文字仍是浅灰', cssProp('.chips .badge', 'color'), 'rgb(198, 204, 214)');
+    ok('答题页：题型徽标文字对比度 ≥ 4.5:1',
+      contrastRatio(cssProp('.chips .badge', 'color'), cssProp('.chips .badge', 'backgroundColor')) >= 4.5,
+      'ratio=' + contrastRatio(cssProp('.chips .badge', 'color'), cssProp('.chips .badge', 'backgroundColor')).toFixed(2));
+
+    // 结果页（直接交卷，走确认框）
+    click(q('#btnFinish'));
+    if (q('[data-modal-confirm]')) click(q('[data-modal-confirm]'));
+    eq('结果页：背景深色', bodyBg(), THEME_BG_DARK);
+    // 统计卡改成了环形 + 一行数字，这里改验新组件的深色取值
+    eq('结果页：环形轨道用深色 --mid', cssProp('.ring__track', 'stroke'), 'rgb(59, 65, 73)');
+    eq('结果页：环形进度仍是强调色', cssProp('.ring__bar', 'stroke'), 'rgb(109, 93, 252)');
+    eq('结果页：统计数字浅色', cssProp('.stat__value', 'color'), THEME_INK_DARK);
+    eq('结果页：统计标签是深色下的次要墨色', cssProp('.stat__label', 'color'), 'rgb(198, 204, 214)');
+    eq('结果页：题型色点保持强调色', cssProp('.row__dot--single', 'backgroundColor'), 'rgb(109, 93, 252)');
+
+    // 练习记录（三个入口都会渲染，这里必须点 web 那个，否则进的是 Java 的空记录页）
+    click(q('[data-act="back"]'));
+    ensureList();
+    ok('交卷后列表页有练习记录入口', !!recordsEntry());
+    click(recordsEntry());
+    eq('练习记录页：标题浅色', cssProp('.h1', 'color'), THEME_INK_DARK);
+    darkSurface('练习记录页卡片', '[data-record]');
+    click(q('[data-act="back"]'));
+
+    // 反馈箱
+    ensureList();
+    click(q('[data-act="feedback-box"]'));
+    eq('反馈箱：标题浅色', cssProp('.h1', 'color'), THEME_INK_DARK);
+    eq('反馈箱：背景深色', bodyBg(), THEME_BG_DARK);
+    click(q('[data-act="back"]'));
+
+    // 维护日志
+    ensureList();
+    click(q('[data-act="changelog"]'));
+    eq('维护日志：标题浅色', cssProp('.h1', 'color'), THEME_INK_DARK);
+    eq('维护日志：有条目', qa('.cl-item').length > 0, true);
+    eq('维护日志：日期文字仍是浅灰', cssProp('.cl-item', 'color'), THEME_INK_DARK);
+    click(q('[data-act="back"]'));
+
+    log('--- 主题三态：三态轮换 3 轮 ---');
+    ensureList();
+    var seq = [];
+    var sys = sysTheme();
+    var threw = false;
+    try {
+      for (var i = 0; i < 3; i++) {
+        pickTheme('light');
+        seq.push(themeMode() + '/' + themeOf());
+        pickTheme('dark');
+        seq.push(themeMode() + '/' + themeOf());
+        pickTheme('system');
+        seq.push(themeMode() + '/' + themeOf());
+      }
+    } catch (e) {
+      threw = e;
+    }
+    ok('三态轮换 3 轮没有报错', !threw, threw && threw.message);
+    var one = 'light/light,dark/dark,system/' + sys;
+    eq('每一次都生效（mode/解析）', seq.join(','), [one, one, one].join(','));
+    eq('轮换完停在「跟随系统」', themeMode(), 'system');
+    eq('此时按钮文字是「跟随」', themeBtnText(), Copy.THEME_SHORT_SYSTEM);
+
+    log('--- 主题三态：跟随系统时不写死数值 ---');
+    eq('跟随系统下 meta 跟着解析结果走', q('meta[name="theme-color"]').content,
+      sys === 'dark' ? '#2f3339' : '#e0e5ec');
+    eq('跟随系统下 color-scheme 跟着解析结果走', document.documentElement.style.colorScheme, sys);
+
+    log('--- 主题三态：切到暗色量宽度 ---');
+    pickTheme('dark');
+    eq('切到暗色', themeOf(), 'dark');
+
+    log('--- 主题：深色下的宽度 ---');
+    var de = document.documentElement;
+    ok('深色下页面无横向滚动', de.scrollWidth <= de.clientWidth + 1,
+      'scrollWidth=' + de.scrollWidth + ' clientWidth=' + de.clientWidth);
+    ok('深色下顶栏在 375px 放得下（标题可截断）', topbarFitsAt(375));
+    ok('深色下顶栏在 320px 放得下', topbarFitsAt(320));
+    ok('切换后仍停在题库列表', text('.h1') === window.QuizCopy.LIST_TITLE, text('.h1'));
+    restoreTransitions();
+  }
+
+  function runThemeRefreshCheck() {
+    var Copy = window.QuizCopy;
+    var Theme = window.QuizTheme;
+    log('--- 主题三态：刷新后 ---');
+    eq('刷新后仍是「暗色」三态', themeMode(), 'dark');
+    eq('刷新后解析结果仍是深色', themeOf(), 'dark');
+    eq('刷新后背景深色', bodyBg(), THEME_BG_DARK);
+    eq('刷新后主文字浅色', cssProp('.h1', 'color'), THEME_INK_DARK);
+    eq('刷新后按钮文字是「暗色」', themeBtnText(), Copy.THEME_SHORT_DARK);
+    eq('刷新后 aria-expanded=false', themeBtn().getAttribute('aria-expanded'), 'false');
+    eq('刷新后存储仍是 dark', themeStored() && themeStored().theme, 'dark');
+    ok('刷新后正文对比度仍 ≥ 4.5:1',
+      contrastRatio(cssProp('.h1', 'color'), bodyBg()) >= 4.5);
+
+    // 改成「跟随系统」→ 解析结果回到系统偏好
+    ok('菜单里能选「跟随系统」', pickTheme('system'));
+    eq('跟随系统后解析结果=系统偏好', themeOf(), sysTheme());
+    eq('背景跟着解析结果', bodyBg(), sysTheme() === 'dark' ? THEME_BG_DARK : THEME_BG_LIGHT);
+    eq('按钮文字变「跟随」', themeBtnText(), Copy.THEME_SHORT_SYSTEM);
+    eq('存储变成 system', themeStored() && themeStored().theme, 'system');
+    eq('重开菜单时选中项是「跟随系统」', (openThemeMenu(), themeMenuChecked().join(',')), 'system');
+    click(themeBtn()); // 收起菜单，别把浮层留在下面
+
+    // 旧值兼容：老版本就是只存 'light' / 'dark'（带 version 的存储格式）
+    localStorage.setItem(Theme.KEY, JSON.stringify({ theme: 'light', version: 1, savedAt: new Date().toISOString() }));
+    Theme.apply(Theme.load());
+    eq('旧值 light 仍然认（兼容）', themeOf(), 'light');
+    eq('旧值 light 的三态记录是 light', themeMode(), 'light');
+
+    // 非法值当「跟随系统」
+    localStorage.setItem(Theme.KEY, JSON.stringify({ theme: 'blue', version: 1, savedAt: new Date().toISOString() }));
+    Theme.apply(Theme.load());
+    eq('非法值按跟随系统处理', themeMode(), 'system');
+    eq('非法值解析结果跟系统一致', themeOf(), sysTheme());
+  }
+
+  /**
+   * 答题页 / 结果页的排版断言（36C）。
+   * 全程自己造状态：清掉 web 的普通进度 → 从第 1 题开一轮 → 选 A 提交（web 第 1 题答案是 B，
+   * 所以这一题一定是「错」，顺手把错误态与正确态都验到）→ 交卷进结果页。
+   */
+  function runLayoutChecks() {
+    log('--- 答题页排版（字母胶囊 / 选项 / meta 行 / 进度条）---');
+    backToList();
+    clearNormalProgress('web');
+    openBank('web');
+    goBack(1);
+    eq('排版检查从第 1 题开始', currentIndex(), 1);
+
+    // 字母胶囊：26px 圆片、凹陷、12px/600
+    var key = q('.opt__key');
+    ok('选项左侧有字母胶囊', !!key);
+    if (key) {
+      var kr = key.getBoundingClientRect();
+      eq('字母胶囊直径 26px', Math.round(kr.width), 26);
+      eq('字母胶囊是正圆', Math.round(kr.width), Math.round(kr.height));
+      eq('字母胶囊字号 12px', getComputedStyle(key).fontSize, '12px');
+      eq('字母胶囊字重 600', getComputedStyle(key).fontWeight, '600');
+      eq('字母胶囊是凹陷', getComputedStyle(key).boxShadow.indexOf('inset') !== -1, true);
+      eq('字母胶囊字色是次要墨色', getComputedStyle(key).color, appInk2());
+    }
+
+    // 选项：52px 高、12/14 内边距、4/8 一档、悬停不抬层级
+    var opt = q('.opt');
+    if (opt) {
+      var or = opt.getBoundingClientRect();
+      ok('选项高度 ≥52px', or.height >= 52, 'h=' + or.height);
+      eq('选项内边距 12px 14px', getComputedStyle(opt).padding, '12px 14px');
+      eq('选项圆角是控件圆角', getComputedStyle(opt).borderRadius, appVar('--r-ctl'));
+      var holes = getComputedStyle(opt).boxShadow;
+      eq('选项默认停在 4/8 一档', holes, SH_SM_LIGHT);
+      eq('选项不是凹陷', holes.indexOf('inset') === -1, true);
+    }
+
+    // meta 行：第 x/y 题 13px --ink-2，徽标 24px 高，星标 40×40 / 18px / 4-8 一档
+    eq('meta 行题号 13px', cssProp('.meta__count', 'fontSize'), '13px');
+    eq('meta 行题号用次要墨色', cssProp('.meta__count', 'color'), appInk2());
+    eq('meta 行徽标高 24px', Math.round(q('.meta__tags .badge').getBoundingClientRect().height), 24);
+    var st = q('.meta .star');
+    ok('收藏星在 meta 行', !!st);
+    ok('题目卡里不再重复一颗星', qa('.card .star').length === 0, 'got ' + qa('.card .star').length);
+    if (st) {
+      var sr = st.getBoundingClientRect();
+      eq('星标点击区 40×40', Math.round(sr.width) + 'x' + Math.round(sr.height), '40x40');
+      eq('星标图标 18px', getComputedStyle(st).fontSize, '18px');
+      eq('星标停在 4/8 一档', getComputedStyle(st).boxShadow, SH_SM_LIGHT);
+    }
+    eq('meta 行在 375px 宽度内不横向溢出',
+      (function () {
+        var m = q('.meta');
+        m.style.width = '343px';
+        var over = m.scrollWidth <= m.clientWidth + 1;
+        m.style.width = '';
+        return over;
+      })(), true);
+
+    // 进度条：8px 高、槽底 --mid、填充强调色
+    eq('进度条高 8px', Math.round(q('.progress__track').getBoundingClientRect().height), 8);
+    eq('进度槽底是 --mid', cssProp('.progress__track', 'backgroundColor'), appVar('--mid'));
+    eq('进度填充是强调色', cssProp('.progress__fill', 'backgroundColor'), appVar('--accent'));
+    eq('进度填充不再是半透明', cssProp('.progress__fill', 'opacity'), '1');
+
+    // 章节刻度：整库一轮（全部 120 题）时 Web 有 5 个章节边界，1px 宽
+    var ticks = qa('.progress__tick');
+    ok('全部 120 题时有 5 个章节刻度', ticks.length === 5, 'got ' + ticks.length);
+    if (ticks.length) {
+      eq('章节刻度 1px 宽', getComputedStyle(ticks[0]).width, '1px');
+      eq('章节刻度压暗到 0.35', getComputedStyle(ticks[0]).opacity, '0.35');
+    }
+
+    log('--- 答题页判定态（状态条 / 胶囊变色）---');
+    click(q('[data-opt="A"]'));
+    submitNow();
+    var wrongOpt = q('.opt--wrong');
+    var correctOpt = q('.opt--correct');
+    ok('A 判成错、B 判成对', !!wrongOpt && !!correctOpt);
+    if (wrongOpt && correctOpt) {
+      eq('错误选项左侧状态条 3px', getComputedStyle(wrongOpt, '::before').width, '3px');
+      eq('错误状态条是 --bad', getComputedStyle(wrongOpt, '::before').backgroundColor, appVar('--bad'));
+      eq('正确状态条是 --ok', getComputedStyle(correctOpt, '::before').backgroundColor, appVar('--ok'));
+      eq('错误胶囊底色 --bad', getComputedStyle(wrongOpt.querySelector('.opt__key')).backgroundColor, appVar('--bad'));
+      eq('正确胶囊文字用 --on-ok', getComputedStyle(correctOpt.querySelector('.opt__key')).color, appVar('--on-ok'));
+      eq('原有 ✓/✕ 文字标签仍在', qa('.opt__tag').length, 2);
+    }
+
+    log('--- 结果页（环形 / 统计行 / 题型点 / 按钮层级）---');
+    finishNow();
+
+    var svg = q('.ring svg');
+    ok('正确率环形是内联 SVG', !!svg);
+    if (svg) {
+      var rr = svg.getBoundingClientRect();
+      eq('环形 72×72', Math.round(rr.width) + 'x' + Math.round(rr.height), '72x72');
+      eq('环宽 8px', getComputedStyle(q('.ring__bar')).strokeWidth, '8px');
+      eq('轨道是 --mid', getComputedStyle(q('.ring__track')).stroke, appVar('--mid'));
+      eq('进度圈是强调色', getComputedStyle(q('.ring__bar')).stroke, appVar('--accent'));
+      eq('进度圈圆头', getComputedStyle(q('.ring__bar')).strokeLinecap, 'round');
+      var dash = Number((q('.ring__bar').getAttribute('stroke-dasharray') || '').split(',')[0]);
+      ok('周长按半径 30 算（≈188.5）', Math.abs(dash - 188.50) < 0.2, 'dash=' + dash);
+      eq('中心百分比 24px', cssProp('.ring__value', 'fontSize'), '24px');
+      eq('中心百分比 600', cssProp('.ring__value', 'fontWeight'), '600');
+      eq('中心百分比带 %', /%$/.test(text('.ring__value')), true);
+    }
+
+    eq('统计行与环形间距 16px',
+      Math.round(q('.stats').getBoundingClientRect().left - q('.ring').getBoundingClientRect().right), 16);
+    eq('统计标签 13px', cssProp('.stat__label', 'fontSize'), '13px');
+    eq('统计标签用次要墨色', cssProp('.stat__label', 'color'), appInk2());
+    eq('统计数字 15px', cssProp('.stat__value', 'fontSize'), '15px');
+    eq('统计数字 600', cssProp('.stat__value', 'fontWeight'), '600');
+    var statLabels = qa('.stat__label').map(function (e) { return e.textContent.trim(); });
+    eq('统计行是 答对 / 答错 / 未作答', statLabels.join('/'), ['答对', '答错', '未作答'].join('/'));
+
+    var dot = q('.row__dot');
+    ok('结果页每行有题型色点', !!dot);
+    if (dot) {
+      var dr = dot.getBoundingClientRect();
+      eq('题型色点 8px', Math.round(dr.width) + 'x' + Math.round(dr.height), '8x8');
+      eq('题型色点是圆的', getComputedStyle(dot).borderRadius, '50%');
+      var dotSingle = getComputedStyle(q('.row__dot--single') || dot).backgroundColor;
+      eq('单选色点是强调色', dotSingle, appVar('--accent'));
+    }
+    ok('结果页行高 ≥44px', q('.row').getBoundingClientRect().height >= 44,
+      'h=' + q('.row').getBoundingClientRect().height);
+    eq('每行都有色点', qa('.row__dot').length, qa('.row').length);
+
+    ok('结果页只有 1 个主按钮', qa('.page .btn--primary').length === 1,
+      'got ' + qa('.page .btn--primary').length);
+    var acts = qa('.result-actions .btn');
+    ok('结果页底部动作都在', acts.length >= 1);
+    eq('底部动作是纯文字层级（无阴影）',
+      acts.every(function (e) { return getComputedStyle(e).boxShadow === 'none'; }), true);
+    var quiet = q('.btn--quiet');
+    if (quiet) {
+      eq('次要整行按钮停在 4/8 一档', getComputedStyle(quiet).boxShadow, SH_SM_LIGHT);
+    }
+    ok('结果页无横向滚动', document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      'sw=' + document.documentElement.scrollWidth + ' cw=' + document.documentElement.clientWidth);
+
+    backToList();
+  }
+
+  /** 题号跳转：输入框 + 「跳」按钮、按本轮题序、非法输入给「1–y」提示 */
+  /**
+   * 题号跳转：同一个功能两副样子——窄屏是 meta 行里的小输入框 + 「跳」，
+   * 宽屏（≥1080px）是右侧固定浮窗。两者都在 DOM 里，由 CSS 决定谁可见，
+   * 所以这里两个分支的断言条数必须完全相等（否则 1440 与 1024 跑出的条数会不同）。
+   */
+  function runJumpChecks() {
+    log('--- 题号跳转（meta 行 / 宽屏侧边浮窗）---');
+    backToList();
+    clearNormalProgress('web');
+    openBank('web');
+    goBack(1);
+    eq('跳转检查从第 1 题开始', currentIndex(), 1);
+
+    var wide = window.innerWidth >= 1080;
+    var dock = q('.jump-dock');
+    var metaJump = q('.meta__tools .jump');
+    ok('两种形态都渲染了（谁可见交给 CSS）', !!dock && !!metaJump);
+    ok('宽屏只显示侧边浮窗', wide === (!!dock && getComputedStyle(dock).display !== 'none'),
+      'wide=' + wide + ' dock=' + (dock ? getComputedStyle(dock).display : '-'));
+    ok('窄屏只显示 meta 行跳转', !wide === (!!metaJump && getComputedStyle(metaJump).display !== 'none'),
+      'wide=' + wide + ' meta=' + (metaJump ? getComputedStyle(metaJump).display : '-'));
+
+    if (wide) {
+      var dr = dock.getBoundingClientRect();
+      eq('浮窗宽 130px', Math.round(dr.width), 130);
+      eq('浮窗是 fixed 定位（不参与文档流）', getComputedStyle(dock).position, 'fixed');
+      var pageEl = q('.page--quiz');
+      var contentRight = pageEl.getBoundingClientRect().right - parseFloat(getComputedStyle(pageEl).paddingRight);
+      ok('浮窗在内容右缘之外至少 12px', dr.left >= contentRight + 12,
+        'left=' + Math.round(dr.left) + ' contentRight=' + Math.round(contentRight));
+      eq('浮窗贴着顶栏下方（top 96px）', Math.round(dr.top), 96);
+      var dockInput = q('[data-jump-dock-input]');
+      var dir = dockInput.getBoundingClientRect();
+      eq('浮窗输入框 106×28', Math.round(dir.width) + 'x' + Math.round(dir.height), '106x28');
+      eq('浮窗输入框是凹陷的', getComputedStyle(dockInput).boxShadow.indexOf('inset') !== -1, true);
+      eq('浮窗输入框用数字键盘', dockInput.getAttribute('inputmode'), 'numeric');
+      eq('浮窗按钮 28px 高', Math.round(q('.jump-dock__btn').getBoundingClientRect().height), 28);
+      eq('浮窗按钮文案', q('.jump-dock__btn').textContent.trim(), window.QuizCopy.JUMP_DOCK_BTN);
+    } else {
+      var metaInput = q('[data-jump-input]');
+      var mir = metaInput.getBoundingClientRect();
+      eq('meta 输入框 56×28', Math.round(mir.width) + 'x' + Math.round(mir.height), '56x28');
+      eq('meta 输入框是凹陷的', getComputedStyle(metaInput).boxShadow.indexOf('inset') !== -1, true);
+      eq('输入框占位是「题号」', metaInput.getAttribute('placeholder'), window.QuizCopy.JUMP_PLACEHOLDER);
+      eq('输入框用数字键盘', metaInput.getAttribute('inputmode'), 'numeric');
+      eq('「跳」按钮 28px 高', Math.round(q('[data-act="jump"]').getBoundingClientRect().height), 28);
+      eq('「跳」按钮文案', q('[data-act="jump"]').textContent.trim(), window.QuizCopy.JUMP_BTN);
+      eq('「跳」按钮停在 4/8 一档', getComputedStyle(q('[data-act="jump"]')).boxShadow, SH_SM_LIGHT);
+      var metaEl0 = q('.meta');
+      var savedW0 = metaEl0.style.width;
+      metaEl0.style.width = '343px';
+      ok('375px 宽度下 meta 行不横向溢出', metaEl0.scrollWidth <= metaEl0.clientWidth + 1,
+        'sw=' + metaEl0.scrollWidth + ' cw=' + metaEl0.clientWidth);
+      metaEl0.style.width = savedW0;
+      eq('meta 行里只有一处跳转输入框', document.querySelectorAll('[data-jump-input]').length, 1);
+    }
+
+    var inputSel = wide ? '[data-jump-dock-input]' : '[data-jump-input]';
+    var btnSel = wide ? '[data-act="jump-dock"]' : '[data-act="jump"]';
+    var hintSel = wide ? '[data-jump-dock-hint]' : '[data-jump-hint]';
+
+    // 输入 5 + Enter
+    q(inputSel).value = '5';
+    q(inputSel).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    eq('输入 5 回车跳到第 5 题', currentIndex(), 5);
+    // 两种形态唯一的行为差异：浮窗保留输入值，方便连跳
+    eq(wide ? '浮窗跳完保留输入的题号' : 'meta 行跳完清空输入框', q(inputSel).value, wide ? '5' : '');
+    eq('跳完不显示提示', q(hintSel).hidden, true);
+
+    // 点按钮也能跳
+    q(inputSel).value = '9';
+    click(q(btnSel));
+    eq('点按钮跳到第 9 题', currentIndex(), 9);
+    eq('浮窗里的题号跟着当前题走', q('[data-jump-count]').textContent.trim(), '第 9/120 题');
+
+    // 非法输入：0 / 超界 / 非数字 → 原地不动 + 提示区间
+    ['0', '999', 'abc'].forEach(function (bad) {
+      q(inputSel).value = bad;
+      click(q(btnSel));
+      eq('输入「' + bad + '」不跳题', currentIndex(), 9);
+      var hint = q(hintSel);
+      ok('输入「' + bad + '」给出区间提示', !!hint && !hint.hidden && hint.textContent === window.QuizCopy.JUMP_HINT(120),
+        hint ? 'text=' + hint.textContent + ' hidden=' + hint.hidden : 'no hint');
+      eq('提示是 11px', getComputedStyle(hint).fontSize, '11px');
+      eq('提示用 --bad', getComputedStyle(hint).color, appVar('--bad'));
+      var other = q(wide ? '[data-jump-hint]' : '[data-jump-dock-hint]');
+      ok('另一形态的提示位没有被连带点亮', !!other && (other.hidden || other.textContent === ''),
+        other ? 'hidden=' + other.hidden + ' text=' + other.textContent : 'missing');
+    });
+    q(inputSel).value = '';
+
+    // 只读视图（历史快照）不给跳转、也不给收藏
+    var roHtml = window.QuizViewQuiz.render({
+      session: window.QuizApp.session(),
+      readonly: true,
+      starredOf: function () { return false; },
+    });
+    ok('只读视图不渲染跳转框（两种形态都没有）',
+      roHtml.indexOf('data-jump-input') === -1 && roHtml.indexOf('data-jump-dock-input') === -1);
+    ok('只读视图不渲染收藏星', roHtml.indexOf('data-star') === -1);
+
+    backToList();
+  }
+
+  /* ================= 答题卡（题号网格） ================= */
+  // 数一段 HTML 里某个片段出现了几次（只读视图没法挂进 DOM，直接数类名）
+  function countOf(html, needle) {
+    return html.split(needle).length - 1;
+  }
+
+  /**
+   * 答题卡验收：219 题里答对 2 / 答错 1，网格 2 青 1 红、其余灰；
+   * 统计算得出来；点格子跳题；四态底色各用各的令牌；数据异常题只多一个小点。
+   */
+  function runAnswerCardChecks() {
+    log('--- 答题卡：宽屏侧边浮窗 ---');
+    backToList();
+    clearNormalProgress('java');
+    openBank('java', 'all');
+    eq('答题卡检查从 Java 全量 219 题开始', totalCount(), 219);
+    goBack(1);
+    eq('答题卡检查从第 1 题开始', currentIndex(), 1);
+
+    // 对 2 错 1，停在第 3 题
+    pickCorrect(); submitNow();
+    click(q('[data-act="next"]'));
+    pickCorrect(); submitNow();
+    click(q('[data-act="next"]'));
+    pickWrong(); submitNow();
+    eq('答完三题停在第 3 题', currentIndex(), 3);
+    var javaSession = window.QuizApp.session();
+    eq('本轮判分 2 对 1 错', [javaSession.stats().correct, javaSession.stats().wrong], [2, 1]);
+
+    var toggle = q('.jump-dock__overview');
+    ok('宽屏浮窗里有「总览」按钮', !!toggle);
+    eq('「总览」文案', toggle ? toggle.textContent.trim() : '', '总览');
+    eq('默认收起：aria-expanded=false', toggle.getAttribute('aria-expanded'), 'false');
+    ok('默认不显示答题卡', !visible(q('.jump-dock__card')));
+
+    click(toggle);
+    ok('点「总览」展开答题卡', visible(q('.jump-dock__card')));
+    eq('展开后 aria-expanded=true', q('.jump-dock__overview').getAttribute('aria-expanded'), 'true');
+    eq('展开后浮窗带 card-open 类', q('.jump-dock').classList.contains('jump-dock--card-open'), true);
+
+    // 窄屏形态：宽屏下按钮藏起来、覆盖层不显示，但 DOM 里是同一份网格
+    eq('窄屏「总览」按钮在宽屏隐藏', getComputedStyle(q('.card-toggle--meta')).display, 'none');
+    ok('宽屏展开时覆盖层 markup 也在（跨断点不用换代码）', !!q('[data-card-overlay]'));
+    eq('宽屏下覆盖层不显示', getComputedStyle(q('[data-card-overlay]')).display, 'none');
+    eq('覆盖层是 dialog', q('#answerCardOverlay').getAttribute('role'), 'dialog');
+    eq('覆盖层里也是 219 个格子', qa('#answerCardOverlay .answer-card__cell').length, 219);
+
+    var cells = qa('.jump-dock .answer-card__cell');
+    eq('格子数 = 本轮题数', cells.length, 219);
+    // 浮窗只有 130px：统计拆成两行短句，各自单行；覆盖层仍是完整一句
+    var dockStats = q('.jump-dock [data-answer-card-stats]');
+    var dockLines = qa('.jump-dock .answer-card__stats-line');
+    eq('浮窗统计是两行短句', dockLines.length, 2);
+    eq('浮窗统计第一行', dockLines[0] ? dockLines[0].textContent.trim() : '', '未答 216');
+    eq('浮窗统计第二行', dockLines[1] ? dockLines[1].textContent.trim() : '', '对 2 · 错 1');
+    ok('浮窗统计第一行不折行', dockLines[0].getClientRects().length === 1,
+      'rects=' + dockLines[0].getClientRects().length);
+    ok('浮窗统计第二行不折行', dockLines[1].getClientRects().length === 1,
+      'rects=' + dockLines[1].getClientRects().length);
+    ok('浮窗统计两行总高不超过两行',
+      dockStats.getBoundingClientRect().height <= 34, 'h=' + dockStats.getBoundingClientRect().height);
+    eq('浮窗统计 12px', getComputedStyle(dockStats).fontSize, '12px');
+    eq('浮窗统计用 --ink-3', getComputedStyle(dockStats).color, appVar('--ink-3'));
+    eq('覆盖层统计仍是完整一句', text('#answerCardOverlay [data-answer-card-stats]'),
+      '未答 216 · 答对 2 · 答错 1');
+    ok('覆盖层统计单行不折',
+      q('#answerCardOverlay [data-answer-card-stats]').getBoundingClientRect().height <= 18,
+      'h=' + q('#answerCardOverlay [data-answer-card-stats]').getBoundingClientRect().height);
+
+    ok('第 1 题格子是「已答对」', cells[0].classList.contains('answer-card__cell--correct'));
+    ok('第 2 题格子是「已答对」', cells[1].classList.contains('answer-card__cell--correct'));
+    ok('第 3 题格子是「已答错」', cells[2].classList.contains('answer-card__cell--wrong'));
+    ok('答错的当前格保留错误底色（不隐藏状态）',
+      getComputedStyle(cells[2]).backgroundColor === appVar('--bad'),
+      'bg=' + getComputedStyle(cells[2]).backgroundColor);
+    eq('当前格 aria-current=true', cells[2].getAttribute('aria-current'), 'true');
+    eq('格子 aria-label = 题号 + 状态', cells[2].getAttribute('aria-label'), '第 3 题，已答错');
+    ok('当前格带 --sh-focus 焦点环', getComputedStyle(cells[2]).boxShadow.indexOf('3px') !== -1,
+      getComputedStyle(cells[2]).boxShadow);
+
+    // 四态底色（当前格先挑未答题，见下面第 10 格）
+    eq('已答对格子底色 --ok', getComputedStyle(cells[0]).backgroundColor, appVar('--ok'));
+    eq('已答错格子底色 --bad', getComputedStyle(cells[2]).backgroundColor, appVar('--bad'));
+    eq('未答格子底色 --mid', getComputedStyle(cells[3]).backgroundColor, appVar('--mid'));
+    eq('未答格子字色 --ink-3', getComputedStyle(cells[3]).color, appVar('--ink-3'));
+    eq('已答对格子字色 --on-ok', getComputedStyle(cells[0]).color, appVar('--on-ok'));
+    eq('已答错格子字色 --on-accent', getComputedStyle(cells[2]).color, appVar('--on-accent'));
+
+    var cellBox = cells[0].getBoundingClientRect();
+    eq('格子 32×32', Math.round(cellBox.width) + 'x' + Math.round(cellBox.height), '32x32');
+    eq('格子圆角 8px', getComputedStyle(cells[0]).borderRadius, '8px');
+    var gridEl = q('.jump-dock .answer-card__grid');
+    eq('格子间距 6px', getComputedStyle(gridEl).rowGap, '6px');
+    eq('侧边网格最高 320px', getComputedStyle(gridEl).maxHeight, '320px');
+    eq('侧边网格可纵向滚动', getComputedStyle(gridEl).overflowY, 'auto');
+    ok('219 题装进 320px 里滚动', gridEl.scrollHeight > gridEl.clientHeight + 100,
+      'sh=' + gridEl.scrollHeight + ' ch=' + gridEl.clientHeight);
+
+    // 点第 10 个格子 → 跳第 10 题；宽屏保持展开
+    click(cells[9]);
+    eq('点第 10 个格子跳到第 10 题', currentIndex(), 10);
+    ok('宽屏跳完仍展开', visible(q('.jump-dock__card')));
+    var cells2 = qa('.jump-dock .answer-card__cell');
+    eq('跳完格子数不变', cells2.length, 219);
+    eq('新的当前格是第 10 题', cells2[9].getAttribute('aria-current'), 'true');
+    eq('未答的当前格底色 --bg', getComputedStyle(cells2[9]).backgroundColor, appVar('--bg'));
+    eq('未答的当前格字色 --ink', getComputedStyle(cells2[9]).color, appVar('--ink'));
+    eq('统计行不随跳题变化', text('.jump-dock [data-answer-card-stats]').replace(/\s+/g, ''),
+      '未答216对2·错1');
+    ok('答题卡没有横向滚动', gridEl.scrollWidth <= gridEl.clientWidth + 1,
+      'sw=' + gridEl.scrollWidth + ' cw=' + gridEl.clientWidth);
+    ok('页面没有横向滚动',
+      document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+      'sw=' + document.documentElement.scrollWidth + ' cw=' + document.documentElement.clientWidth);
+    var dockR = q('.jump-dock').getBoundingClientRect();
+    var pageEl = q('.page--quiz');
+    var contentRight = pageEl.getBoundingClientRect().right - parseFloat(getComputedStyle(pageEl).paddingRight);
+    ok('展开后浮窗仍在内容右缘之外 ≥12px', dockR.left >= contentRight + 12,
+      'left=' + Math.round(dockR.left) + ' contentRight=' + Math.round(contentRight));
+
+    click(q('.jump-dock__overview'));
+    ok('再点「总览」收起', !visible(q('.jump-dock__card')));
+    eq('收起后 aria-expanded=false', q('.jump-dock__overview').getAttribute('aria-expanded'), 'false');
+    ok('收起后覆盖层从 DOM 移除', !q('[data-card-overlay]'));
+
+    /* ------------- 数据异常题：只多一个小点 ------------- */
+    log('--- 答题卡：数据异常题右下角小点 ---');
+    backToList();
+    clearNormalProgress('web');
+    openBank('web', 'all');
+    goBack(1);
+    click(q('.jump-dock__overview'));
+    var webCells = qa('.jump-dock .answer-card__cell');
+    eq('Web 格子数 = 120', webCells.length, 120);
+    ok('Web #31 标了数据异常', webCells[30].classList.contains('answer-card__cell--invalid'));
+    eq('数据异常题底色不变（仍是 --mid）', getComputedStyle(webCells[30]).backgroundColor, appVar('--mid'));
+    var dot = getComputedStyle(webCells[30], '::after');
+    eq('右下角小点 4px', dot.width, '4px');
+    eq('小点用 --ink-3', dot.backgroundColor, appVar('--ink-3'));
+
+    /* ------------- 只读快照：颜色照常、点击只跳不改判 ------------- */
+    log('--- 答题卡：只读快照 ---');
+    var roHtml = window.QuizViewQuiz.render({
+      session: javaSession,
+      readonly: true,
+      starredOf: function () { return false; },
+    });
+    eq('只读视图格子数 = 本轮题数', countOf(roHtml, 'data-goto="'), 219);
+    eq('只读视图照常标出 2 题答对', countOf(roHtml, 'answer-card__cell--correct'), 2);
+    eq('只读视图照常标出 1 题答错', countOf(roHtml, 'answer-card__cell--wrong'), 1);
+    ok('只读视图格子仍带 data-goto（只能跳、不能改判）', roHtml.indexOf('data-goto="9"') !== -1);
+    ok('只读视图照常给状态 aria-label', roHtml.indexOf('aria-label="第 3 题，已答错"') !== -1);
+    ok('只读视图不给跳转输入框',
+      roHtml.indexOf('data-jump-input') === -1 && roHtml.indexOf('data-jump-dock-input') === -1);
+    ok('只读视图不给收藏星', roHtml.indexOf('data-star') === -1);
+
+    backToList();
+    clearNormalProgress('web');
+    clearNormalProgress('java');
+  }
+
+  /**
+   * 可选服务端接入（js/core/api.js）在纯静态模式下的守门断言。
+   * 这里跑在 file:// 下，所以只验「不发请求、不误判在线、字段映射正确」这几条；
+   * 真正的在线路径靠 server/smoke.mjs 与浏览器联调覆盖。
+   */
+  function runApiChecks() {
+    log('--- 可选服务端接入（file:// 下必须完全静默）---');
+    var api = window.QuizApi;
+    ok('加载了 QuizApi', !!api && typeof api === 'object');
+    if (!api) return;
+
+    eq('探活地址是相对路径', api.HEALTH_URL, 'api/health');
+    eq('提交地址是相对路径', api.FEEDBACK_URL, 'api/feedback');
+    eq('探活超时 1.2s', api.PROBE_TIMEOUT, 1200);
+
+    eq('file:// 下不认为可以发请求', api.canRequest(), false);
+    ok('file:// 下 probe() 返回 Promise 且立刻给 false', typeof api.probe() === 'object' && typeof api.probe().then === 'function');
+    ok('probe 之后仍然不是在线状态（没有服务端）', api.online() === false);
+
+    // 字段映射：前端的问题类型键要折成服务端的取值
+    var payload = api.toPayload({
+      bankKey: 'web',
+      bankTitle: 'Web前端题库',
+      questionId: 31,
+      kind: 'option',
+      note: 'x',
+      picked: ['A'],
+      answer: ['A', 'B'],
+      page: 'result',
+    });
+    eq('kind 键折成中文取值', payload.kind, '选项有误');
+    eq('picked 折成数组', payload.picked.join(','), 'A');
+    eq('answer 折成数组', payload.answer.join(','), 'A,B');
+    eq('questionId 折成数字', payload.questionId, 31);
+    eq('未知 kind 落到「其他」', api.toPayload({ questionId: 1, kind: 'zzz' }).kind, '其他');
+    eq('page 缺省是 quiz', api.toPayload({ questionId: 1 }).page, 'quiz');
+  }
+
+  /* ================= 入口 ================= */
+  function finish() {
+    log('');
+    log('RESULT ' + (fail === 0 ? 'PASS' : 'FAIL') + '  pass=' + pass + ' fail=' + fail);
+    document.getElementById('out').textContent = lines.join('\n');
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var hash = location.hash;
+    try {
+      if (hash === '#seed') {
+        runRefreshWrite();
+        finish();
+        return;
+      }
+      if (hash === '#write') {
+        runRefreshWrite();
+        finish();
+        return;
+      }
+      if (hash === '#check') {
+        runRefreshCheck();
+        finish();
+        return;
+      }
+      if (hash === '#replay') {
+        runReplayChecks();
+        finish();
+        return;
+      }
+      if (hash === '#replay-check') {
+        runReplayRefreshCheck();
+        finish();
+        return;
+      }
+      if (hash === '#records') {
+        runRecordsChecks();
+        finish();
+        return;
+      }
+      if (hash === '#records-check') {
+        runRecordsRefreshCheck();
+        finish();
+        return;
+      }
+      if (hash === '#scope') {
+        runScopeChecks();
+        finish();
+        return;
+      }
+      if (hash === '#scope-check') {
+        runScopeRefreshCheck();
+        finish();
+        return;
+      }
+      if (hash === '#feedback') {
+        runFeedbackChecks();
+        finish();
+        return;
+      }
+      if (hash === '#feedback-check') {
+        runFeedbackRefreshCheck();
+        finish();
+        return;
+      }
+      if (hash === '#theme') {
+        runThemeChecks();
+        finish();
+        return;
+      }
+      if (hash === '#theme-check') {
+        runThemeRefreshCheck();
+        finish();
+        return;
+      }
+      if (hash === '#card') {
+        // 答题卡单独跑：底色断言写的是浅色令牌，先显式设成亮色
+        window.QuizTheme.apply(window.QuizTheme.save('light'));
+        runAnswerCardChecks();
+        finish();
+        return;
+      }
+      if (hash === '#wrongbook') {
+        runWrongbookChecks();
+        runStarChecks();
+        finish();
+        return;
+      }
+      if (hash === '#stars') {
+        runStarsWrite();
+        finish();
+        return;
+      }
+      if (hash === '#stars-check') {
+        runStarsRefreshCheck();
+        finish();
+        return;
+      }
+      // 默认（含 #flow）：主流程 + Web 专项 + 题型徽标全量扫描 + 重练 + 练习记录 + 范围选择 + 错题本 + 收藏 + 反馈
+      // 视觉断言写的是浅色规范里的具体数值，所以先显式设成「亮色」——这台机器的系统偏好可能是深色
+      window.QuizTheme.apply(window.QuizTheme.save('light'));
+      runFlow();
+      runWebChecks();
+      runTypeBadgeChecks();
+      runReplayChecks();
+      runRecordsChecks();
+      runScopeChecks();
+      runCountChecks();
+      runBackChecks();
+      runModifyChecks();
+      runHoverChecks();
+      runRecentChecks();
+      runWrongbookChecks();
+      runStarChecks();
+      runFeedbackChecks();
+      runLayoutChecks();
+      runJumpChecks();
+      runAnswerCardChecks();
+      runApiChecks();
+      finish();
+    } catch (e) {
+      log('EXCEPTION ' + (e && e.stack ? e.stack : e));
+      fail++;
+      finish();
+    }
+  });
+})();
+</script>
+</body>
+</html>

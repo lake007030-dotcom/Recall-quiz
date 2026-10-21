@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>e2e 375px · Recall</title>
+<style>
+  body { margin: 0; font: 12px/1.5 monospace; }
+  #f { width: 375px; height: 812px; border: 0; }
+  #out { white-space: pre-wrap; padding: 12px; }
+</style>
+</head>
+<body>
+
+<!--
+  375px 窄屏验证。
+  为什么用 iframe：headless Chrome 的窗口有最小宽度（约 500px），
+  无法把窗口压到 375px；而 iframe 的宽度就是它内部的真实视口，
+  media query 与 scrollWidth 都按 375 计算，因此这是真实的 375px 环境。
+  需要 --allow-file-access-from-files 才能读取 iframe 内部文档。
+-->
+
+<iframe id="f" title="被测页面"></iframe>
+<pre id="out"></pre>
+
+<script>
+(function () {
+  'use strict';
+
+  var lines = [];
+  var pass = 0, fail = 0;
+
+  function ok(name, cond, extra) {
+    if (cond) { pass++; lines.push('PASS  ' + name); }
+    else { fail++; lines.push('FAIL  ' + name + (extra ? '  <<< ' + extra : '')); }
+  }
+  function eq(name, actual, expected) {
+    var a = JSON.stringify(actual), e = JSON.stringify(expected);
+    ok(name, a === e, 'expected ' + e + ', got ' + a);
+  }
+
+  var frame = document.getElementById('f');
+  var d, w;
+
+  function q(sel) { return d.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(d.querySelectorAll(sel)); }
+
+  function finish() {
+    lines.push('');
+    lines.push('RESULT ' + (fail === 0 ? 'PASS' : 'FAIL') + '  pass=' + pass + ' fail=' + fail);
+    document.getElementById('out').textContent = lines.join('\n');
+  }
+
+  function run() {
+    d = frame.contentDocument;
+    w = frame.contentWindow;
+
+    // 手机浏览器（含 DevTools 设备模拟）的滚动条是覆盖式的，不占布局宽度；
+    // 桌面 Chrome 的 iframe 会留一条 15px 经典滚动条，把 375 挤成 360。
+    // 测量前把 iframe 的滚动条宽度设为 0（页面仍可滚动），让「375px」就是 375px。
+    var noBar = d.createElement('style');
+    noBar.textContent = 'html{scrollbar-width:none}html::-webkit-scrollbar{width:0;height:0}';
+    d.head.appendChild(noBar);
+
+    lines.push('--- 375px 视口 ---');
+    eq('iframe 内视口宽度 = 375', w.innerWidth, 375);
+
+    var de = d.documentElement;
+    ok('列表页无横向滚动', de.scrollWidth <= 375 + 1, 'scrollWidth=' + de.scrollWidth);
+
+    /* ---------------- 首页三入口：375 一行、320 允许 2+1 ---------------- */
+    var firstActions = q('.bank-group .bank-actions');
+    var mini = Array.prototype.slice.call(firstActions.querySelectorAll('.btn--mini'));
+    eq('首页三个入口', mini.length, 3);
+    var tops = mini.map(function (b) { return Math.round(b.getBoundingClientRect().top); });
+    ok('375px 三个入口同一行', tops[0] === tops[1] && tops[1] === tops[2], 'tops=' + tops.join(','));
+    ok('入口行不超出视口右缘',
+      firstActions.getBoundingClientRect().right <= de.clientWidth + 1,
+      'right=' + firstActions.getBoundingClientRect().right + ' cw=' + de.clientWidth);
+    eq('窄屏入口字号 11.5px', w.getComputedStyle(mini[0]).fontSize, '11.5px');
+    ok('窄屏入口图标 13px',
+      Math.round(mini[0].querySelector('.mini-ico').getBoundingClientRect().width) === 13,
+      'icon=' + mini[0].querySelector('.mini-ico').getBoundingClientRect().width);
+    ok('窄屏提示用短文案',
+      w.getComputedStyle(q('.bank-note--narrow')).display !== 'none' &&
+      q('.bank-note--narrow').textContent.trim() === '暂无错题 · 暂无收藏',
+      q('.bank-note--narrow').textContent.trim());
+    eq('长文案在窄屏隐藏', w.getComputedStyle(q('.bank-note--wide')).display, 'none');
+
+    // 首页整页不可选中（长按不弹复制菜单），点按不出现安卓默认蓝块
+    eq('首页整页不可选中', w.getComputedStyle(q('.page--list')).userSelect, 'none');
+    eq('点按不高亮（安卓蓝块已关）', w.getComputedStyle(mini[0]).webkitTapHighlightColor,
+      'rgba(0, 0, 0, 0)');
+
+    // 320px：允许 2+1，但行距收紧到 4px 且不许横向滚动
+    frame.style.width = '320px';
+    var tops320 = mini.map(function (b) { return Math.round(b.getBoundingClientRect().top); });
+    ok('320px 不横向滚动', de.scrollWidth <= 321, 'scrollWidth=' + de.scrollWidth);
+    eq('320px 行距 4px', w.getComputedStyle(firstActions).rowGap, '4px');
+    ok('320px 要么一行、要么 2+1（不出现 1+2）',
+      (tops320[0] === tops320[1] && tops320[1] === tops320[2]) ||
+      (tops320[0] === tops320[1] && tops320[2] > tops320[1]),
+      'tops=' + tops320.join(','));
+    frame.style.width = '';
+    eq('恢复 375px', w.innerWidth, 375);
+
+    // 进入 Java 答题页：点题库卡片先弹「开始一轮」面板，确认后才进答题页
+    var bank = q('[data-bank="java"]');
+    ok('找到 Java 题库入口', !!bank);
+    bank.click();
+    var startBtn = q('[data-act="start-round"]');
+    ok('题库入口打开「开始一轮」面板', !!startBtn);
+    if (startBtn) startBtn.click();
+
+    ok('进入答题页', !!q('.actionbar'), '没有底部操作区');
+    ok('答题页无横向滚动', de.scrollWidth <= 375 + 1, 'scrollWidth=' + de.scrollWidth);
+
+    var btns = qa('.actionbar .btn');
+    eq('底部操作区 3 个按钮', btns.length, 3);
+    var small = btns.filter(function (b) { return b.getBoundingClientRect().height < 44; });
+    eq('底部按钮高度 ≥44', small.length, 0);
+
+    // 底部操作区贴底
+    var bar = q('.actionbar');
+    var br = bar.getBoundingClientRect();
+    ok('底部操作区贴视口底部', Math.abs(br.bottom - w.innerHeight) < 2,
+      'bottom=' + br.bottom + ' vh=' + w.innerHeight);
+
+    // 操作区按钮在拇指可达区（距底 120px 内）
+    var lowBtn = btns[1].getBoundingClientRect();
+    ok('主按钮在拇指可达区（距底 <120px）', w.innerHeight - lowBtn.bottom < 120,
+      'dist=' + (w.innerHeight - lowBtn.bottom));
+
+    var opts = qa('.opt');
+    ok('选项存在', opts.length > 0);
+    var shortOpts = opts.filter(function (o) { return o.getBoundingClientRect().height < 52; });
+    eq('移动端选项高度 ≥52', shortOpts.length, 0);
+
+    /* ---------------- 答题卡：meta 行入口 + 全屏覆盖层 ---------------- */
+    // 把 #hex 令牌解析成 computed 颜色（probe 元素读 var()）
+    function tokenColor(name) {
+      var probe = d.createElement('div');
+      probe.style.color = 'var(' + name + ')';
+      d.body.appendChild(probe);
+      var c = w.getComputedStyle(probe).color;
+      d.body.removeChild(probe);
+      return c;
+    }
+
+    // 先答对第 1 题，覆盖层里的统计与配色才有东西可验
+    q('[data-opt="B"]').click();
+    q('[data-act="submit"]').click();
+
+    ok('窄屏 meta 行有「总览」按钮', !!q('.card-toggle--meta'));
+    eq('窄屏不显示宽屏侧边浮窗', w.getComputedStyle(q('.jump-dock')).display, 'none');
+    ok('默认没有覆盖层', !q('.card-overlay'));
+
+    q('.card-toggle--meta').click();
+    var overlay = q('.card-overlay');
+    ok('点「总览」打开全屏覆盖层', !!overlay);
+    var ov = overlay.getBoundingClientRect();
+    // 有纵向滚动条时 fixed 覆盖层的宽度 = 布局视口宽（clientWidth），不是 innerWidth
+    ok('覆盖层铺满视口',
+      Math.abs(ov.left) < 1 && Math.abs(ov.top) < 1 &&
+      Math.abs(ov.width - de.clientWidth) < 1 && Math.abs(ov.height - w.innerHeight) < 1,
+      'rect=' + Math.round(ov.left) + ',' + Math.round(ov.top) + ' ' +
+      Math.round(ov.width) + 'x' + Math.round(ov.height) + ' clientW=' + de.clientWidth);
+
+    var cardPanel = q('#answerCardOverlay');
+    var pr = cardPanel.getBoundingClientRect();
+    ok('卡片最大宽 360px', pr.width <= 360, 'width=' + pr.width);
+    ok('卡片最高 60vh', pr.height <= w.innerHeight * 0.6 + 1, 'height=' + pr.height);
+    eq('卡片纵向可滚动', w.getComputedStyle(cardPanel).overflowY, 'auto');
+    ok('219 题在卡片里滚动', cardPanel.scrollHeight > cardPanel.clientHeight,
+      'sh=' + cardPanel.scrollHeight + ' ch=' + cardPanel.clientHeight);
+    eq('覆盖层格子数 = 本轮题数', qa('#answerCardOverlay .answer-card__cell').length, 219);
+    eq('统计行实时派生', q('#answerCardOverlay [data-answer-card-stats]').textContent,
+      '未答 218 · 答对 1 · 答错 0');
+    eq('答对格子底色 --ok',
+      w.getComputedStyle(qa('#answerCardOverlay .answer-card__cell')[0]).backgroundColor,
+      tokenColor('--ok'));
+    ok('打开时焦点在「关闭」', d.activeElement === q('[data-card-close-btn]'));
+    ok('覆盖层打开时无横向滚动', de.scrollWidth <= 376, 'scrollWidth=' + de.scrollWidth);
+
+    // 点第 10 个格子：跳题、覆盖层关闭、焦点回「总览」
+    qa('#answerCardOverlay .answer-card__cell')[9].click();
+    ok('点格子后覆盖层关闭', !q('.card-overlay'));
+    ok('跳到第 10 题', q('.meta__count').textContent.indexOf('10/219') !== -1,
+      q('.meta__count').textContent);
+    ok('关闭后焦点回「总览」', d.activeElement === q('.card-toggle--meta'));
+
+    // Esc 关闭
+    q('.card-toggle--meta').click();
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    ok('Esc 关闭覆盖层', !q('.card-overlay'));
+
+    // 点空白关闭
+    q('.card-toggle--meta').click();
+    q('.card-overlay__scrim').click();
+    ok('点空白关闭覆盖层', !q('.card-overlay'));
+
+    // 「关闭」按钮关闭
+    q('.card-toggle--meta').click();
+    q('[data-card-close-btn]').click();
+    ok('「关闭」按钮关闭覆盖层', !q('.card-overlay'));
+
+    // 跳到最后一题（Java #219，含长代码块）
+    var guard = 0;
+    while (!q('[data-act="finish"]') && guard++ < 400) {
+      var n = q('[data-act="next"]');
+      if (!n) break;
+      n.click();
+    }
+    ok('到达最后一题', !!q('[data-act="finish"]'), 'guard=' + guard);
+
+    ok('长文本页无横向滚动', de.scrollWidth <= 375 + 1, 'scrollWidth=' + de.scrollWidth);
+
+    var pre = q('.rich pre');
+    ok('#219 有代码块', !!pre);
+    if (pre) {
+      var pr = pre.getBoundingClientRect();
+      ok('代码块不超出视口', pr.width <= 375, 'pre width=' + pr.width);
+      ok('代码块内部可横向滚动', w.getComputedStyle(pre).overflowX === 'auto',
+        w.getComputedStyle(pre).overflowX);
+      ok('代码块确实需要横向滚动（长行）', pre.scrollWidth > pre.clientWidth,
+        'scrollWidth=' + pre.scrollWidth + ' clientWidth=' + pre.clientWidth);
+    }
+
+    // 没有任何元素超出视口右边界（排除被滚动容器裁剪的内部元素）
+    function clippedByScroller(el) {
+      var p = el.parentElement;
+      while (p && p !== d.body) {
+        var ox = w.getComputedStyle(p).overflowX;
+        if (ox === 'auto' || ox === 'scroll' || ox === 'hidden') return true;
+        p = p.parentElement;
+      }
+      return false;
+    }
+    var overflowing = qa('body *').filter(function (el) {
+      var r = el.getBoundingClientRect();
+      return r.width > 0 && r.right > 375 + 1 && !clippedByScroller(el);
+    });
+    eq('没有元素超出视口右边界', overflowing.length, 0);
+    overflowing.slice(0, 6).forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      lines.push('      溢出元素: <' + el.tagName.toLowerCase() +
+        (el.className && typeof el.className === 'string' ? ' class="' + el.className + '"' : '') +
+        '> right=' + Math.round(r.right) + ' width=' + Math.round(r.width) +
+        ' scrollW=' + el.scrollWidth);
+    });
+
+    finish();
+  }
+
+  // 清掉本机进度，从干净状态开始
+  try {
+    Object.keys(localStorage).forEach(function (k) {
+      if (k.indexOf('quiz:') === 0) localStorage.removeItem(k);
+    });
+  } catch (e) {}
+
+  frame.onload = function () {
+    // 等 app.js 在 iframe 内完成首次渲染
+    setTimeout(function () {
+      try { run(); }
+      catch (e) {
+        lines.push('EXCEPTION ' + (e && e.stack ? e.stack : e));
+        fail++;
+        finish();
+      }
+    }, 80);
+  };
+
+  frame.src = '../index.html';
+})();
+</script>
+</body>
+</html>

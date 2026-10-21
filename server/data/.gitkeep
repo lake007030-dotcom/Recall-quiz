@@ -1,0 +1,8 @@
+服务端运行时目录。
+
+起 `node server\server.mjs` 之后这里会出现：
+  recall.db          SQLite 库（feedback / admin_audit 两张表，WAL 模式）
+  recall.db-wal, recall.db-shm
+  admin-token.txt    管理员令牌（首次启动自动生成，随机 24 位）
+
+这些文件都是运行时生成的，不含任何需要提交的内容；纯静态模式（双击 index.html）不会用到这个目录。

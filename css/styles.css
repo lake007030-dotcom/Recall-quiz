@@ -1,0 +1,3184 @@
+/* =========================================================================
+   Recall · 组件样式表
+   -------------------------------------------------------------------------
+   本文件是 docs/样式规范.md 的唯一代码实现。
+   规则：页面里禁止硬编码颜色 / 阴影 / 圆角，一律使用本文件定义的变量与组件类。
+   ========================================================================= */
+
+/* ------------------------------ 设计令牌 ------------------------------ */
+:root {
+  /* 色彩（来自规范第 1 节） */
+  --bg: #e0e5ec;
+  --bg-2: #f0f0f3;
+  --sh-dark: #b8bcc2;
+  --sh-light: #ffffff;
+  --mid: #d1d9e6;
+  --accent: #6d5dfc;
+  /* 强调色亮一档：只给主按钮悬停用（表面变化）。不再额外加 filter，深浅色行为一致 */
+  --accent-hover: #7b6cff;
+  /* 强调色的极淡底（备用：需要「选中但不抢眼」的底色时用它，深浅两套通用） */
+  --accent-soft: rgba(109, 93, 252, 0.12);
+  --ok: #4ecdc4;
+  --bad: #ff6b6b;
+  --warn: #ffe66d;
+  --ink: #333333;
+  --ink-2: #4b5563;
+  --ink-3: #5b6371;
+
+  /* 光影：光源固定左上角。负 X/Y = 白色亮影，正 X/Y = 暗色阴影 */
+  --sh-up: 8px 8px 16px var(--sh-dark), -8px -8px 16px var(--sh-light);
+  /* 悬停只「掉一档」：8/16 → 6/12。再往下掉到 4/8 会让元素像换了个组件 */
+  --sh-up-hover: 6px 6px 12px var(--sh-dark), -6px -6px 12px var(--sh-light);
+  --sh-up-sm: 4px 4px 8px var(--sh-dark), -4px -4px 8px var(--sh-light);
+  /* 小控件（32px 高的一行入口）已经从 4/8 起步，悬停再掉一小档：4/8 → 3/6 */
+  --sh-up-xs: 3px 3px 6px var(--sh-dark), -3px -3px 6px var(--sh-light);
+  --sh-in: inset 4px 4px 8px var(--sh-dark), inset -4px -4px 8px var(--sh-light);
+  --sh-in-sm: inset 2px 2px 4px var(--sh-dark), inset -2px -2px 4px var(--sh-light);
+  --sh-focus: 0 0 0 3px rgba(109, 93, 252, 0.35);
+  --overlay: rgba(224, 229, 236, 0.82);
+
+  /* 前景色：文字落在彩色填充上时用它，而不是借用 --sh-light（深色模式下会变成深灰） */
+  --on-accent: #ffffff; /* 强调色 / 错误色填充上的文字 */
+  --on-ok: #333333; /* 青绿填充上的文字 */
+  --accent-ink: #6d5dfc; /* 强调色「当文字」用（深色底上换更亮的一档） */
+
+  /* 形状 */
+  --r-card: 22px;
+  --r-ctl: 14px;
+  --r-pill: 999px;
+
+  /* 动效：统一 300ms */
+  --dur: 0.3s;
+  --ease: ease-in-out;
+  --transition: box-shadow var(--dur) var(--ease), background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+
+  /* 排版 */
+  --font: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --fs-h1: 28px;
+  --fs-h2: 20px;
+  --fs-body: 15px;
+  --fs-sm: 13px;
+  --fs-xs: 12px;
+  --lh: 1.7;
+
+  /* 布局 */
+  --content-w: 760px;
+  --pad-page: 24px;
+  --pad-card: 24px;
+  --gap-item: 10px;
+  --gap-block: 24px;
+
+  /* 带外阴影的东西（卡片、行）之间按「阴影占位」加间距：
+     8px 的双向外阴影视觉上会吃掉一半间距，10px 看着就像贴着。 */
+  --gap-tight: 8px; /* 标题与说明、meta 行与进度条 */
+  --gap-list: 16px; /* 卡片 / 记录行 / 反馈行之间 */
+  --gap-lead: 28px; /* 说明行与第一张带阴影的卡片之间 */
+  --gap-stack: 20px; /* 进度条与题卡之间 */
+}
+
+/* ------------------------------ 深色模式（夜间） ------------------------------
+   只覆盖一组变量，组件类一行都不用改。触发：<html data-theme="dark">。
+   规则与浅色完全一致（左上亮影 / 右下暗影 / 8-16 与 4-8 两档），只换颜色值：
+   底色 #2f3339 是深灰（不是纯黑）；亮影比底色亮，暗影比底色暗。
+   强调色仍是 #6d5dfc（白字对比度 4.5:1）；深色底上当「文字」用时换 --accent-ink。
+   ------------------------------------------------------------------------- */
+:root[data-theme="dark"] {
+  --bg: #2f3339;
+  --bg-2: #363a41;
+  --sh-dark: #212429;
+  --sh-light: #3f454e;
+  --mid: #3b4149;
+  --accent: #6d5dfc;
+  --ok: #4ecdc4;
+  --bad: #ff6b6b;
+  --warn: #ffe66d;
+  --ink: #e8ebf0;
+  --ink-2: #c6ccd6;
+  --ink-3: #9aa2ae;
+
+  --sh-focus: 0 0 0 3px rgba(155, 144, 255, 0.45);
+  --overlay: rgba(18, 20, 23, 0.72);
+
+  --on-accent: #ffffff;
+  --on-ok: #1f2933;
+  --accent-ink: #a99bff;
+}
+
+/* 移动端：阴影整体缩小一档 */
+@media (max-width: 767px) {
+  :root {
+    --sh-up: var(--sh-up-sm);
+    /* 移动端基准已经是 4/8，悬停不能再「掉一档」到负数，保持 4/8 以免反而变大 */
+    --sh-up-hover: var(--sh-up-sm);
+    --pad-page: 16px;
+    --pad-card: 20px;
+    --fs-h1: 26px;
+    /* 小屏首屏本来就紧，说明与第一张卡片的距离压回来一档 */
+    --gap-lead: 20px;
+  }
+}
+
+/* ------------------------------ 基础重置 ------------------------------ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  /* 触屏点按不要安卓默认的半透明蓝块：反馈只留组件自己的 :active 凹陷 */
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden; /* 375px 下绝不出现横向滚动 */
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+figure,
+pre {
+  margin: 0;
+}
+
+/* 作者样式里的 display 会覆盖浏览器对 [hidden] 的默认 display:none，
+   这里显式声明，保证 hidden 属性真的能把元素藏起来。 */
+[hidden] {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 尊重系统「减少动效」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------ 布局容器 ------------------------------ */
+.page {
+  width: 100%;
+  max-width: var(--content-w);
+  margin: 0 auto;
+  padding: var(--gap-block) var(--pad-page) var(--gap-block);
+}
+
+/* 为固定底部操作区留出空间 */
+.page--with-actionbar {
+  padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+}
+
+.stack > * + * {
+  margin-top: var(--gap-item);
+}
+
+.stack--block > * + * {
+  margin-top: var(--gap-block);
+}
+
+/* 页头（标题 + 一句说明）：两者靠紧，说明与下面第一张带阴影的卡片拉开 */
+.page-head > * + * {
+  margin-top: var(--gap-tight);
+}
+
+.page-head + .list {
+  margin-top: var(--gap-lead);
+}
+
+/* 答题页：meta 行贴紧进度条（它们是同一组信息），进度条与题卡之间留出阴影占位 */
+.page--quiz .meta + .progress {
+  margin-top: var(--gap-tight);
+}
+
+.page--quiz > .card {
+  margin-top: var(--gap-stack);
+}
+
+/* 顶部栏 */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg);
+  padding: 10px 0;
+}
+
+.topbar__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: var(--content-w);
+  margin: 0 auto;
+  padding: 0 var(--pad-page);
+}
+
+/* 站名：凹陷铭牌 + 强调色圆点。不是按钮——不可点、无 hover/active 反馈 */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 40vw; /* 375px 下不与右侧按钮抢位置，超出省略 */
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  box-shadow: inset 3px 3px 6px var(--sh-dark), inset -3px -3px 6px var(--sh-light);
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  cursor: default;
+  user-select: none;
+}
+
+/* 品牌记号：8px 强调色圆点 */
+.brand__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.topbar__title {
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  font-weight: 600;
+  min-width: 0; /* 375px 下可以和右侧按钮挤在一起时省略号截断 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 顶栏右侧动作区：交卷 / 夜间切换排一行 */
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* 顶栏里的按钮紧凑一档，避免 375px 放不下 */
+.topbar__actions .btn {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+}
+
+/* 主题三态：按钮 + 下拉菜单（菜单贴着按钮右对齐，不新增悬浮球） */
+.theme-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+.theme-btn svg {
+  display: block;
+  margin-right: 6px;
+}
+
+.menu {
+  position: absolute;
+  z-index: 42;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 168px;
+  padding: 8px;
+  border-radius: var(--r-card);
+  background: var(--bg);
+  box-shadow: var(--sh-up);
+}
+
+.menu[hidden] {
+  display: none;
+}
+
+.menu__title {
+  margin: 2px 0 6px;
+  padding: 0 8px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+  transition: var(--transition);
+}
+
+.menu__item:hover {
+  background: var(--mid);
+}
+
+.menu__item:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+.menu__item[aria-checked="true"] {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.menu__ico {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ink-3);
+}
+
+.menu__item[aria-checked="true"] .menu__ico {
+  color: var(--accent);
+}
+
+.menu__label {
+  flex: 1 1 auto;
+}
+
+.menu__tick {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+/* ------------------------------ 排版 ------------------------------ */
+.h1 {
+  font-size: var(--fs-h1);
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.h2 {
+  font-size: var(--fs-h2);
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.muted--2 {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 富文本（题干 / 选项 / 解析） */
+.rich {
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  overflow-wrap: anywhere;
+}
+
+.rich p {
+  white-space: pre-wrap; /* 忠实保留原文的硬换行（如 Java #128） */
+}
+
+.rich p + p,
+.rich p + ul,
+.rich p + ol,
+.rich ul + p,
+.rich ol + p,
+.rich pre + p,
+.rich p + pre,
+.rich ul,
+.rich ol {
+  margin-top: 10px;
+}
+
+.rich ul,
+.rich ol {
+  padding-left: 1.35em;
+}
+
+.rich li + li {
+  margin-top: 6px;
+}
+
+.rich strong {
+  font-weight: 600;
+}
+
+.rich code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: var(--bg-2);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+.rich pre {
+  background: var(--bg);
+  box-shadow: var(--sh-in-sm);
+  border-radius: var(--r-ctl);
+  padding: 14px 16px;
+  overflow-x: auto; /* 长代码行在块内滚动，页面不横向滚动 */
+  max-width: 100%;
+}
+
+.rich pre code {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+/* ------------------------------ 卡片 ------------------------------ */
+.card {
+  background: var(--bg);
+  border-radius: var(--r-card);
+  padding: var(--pad-card);
+  box-shadow: var(--sh-up);
+  transition: var(--transition);
+}
+
+.card--flat {
+  box-shadow: none;
+}
+
+.card--clickable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+}
+
+/* 大卡片上 8/16 → 6/12 只差 2px，肉眼看不出来，等于没反馈。
+   所以：大卡片、普通按钮、选项、星标一律跨一整档到 4/8（或浮出 --bg-2 淡底）；
+   只有 32px 的小控件与文字链接用 3/6 那一档 + 底色变化。 */
+.card--clickable:hover,
+.card--clickable.state-hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+.card--clickable:active {
+  box-shadow: var(--sh-in);
+}
+
+.card--clickable:focus-visible {
+  box-shadow: var(--sh-up), var(--sh-focus);
+}
+
+/* 卡片内文字区：button 里只能用 span，而 .stack 的 margin-top 对行内元素不参与布局，
+   所以这里显式竖排（同 .record__main 的处理）。 */
+.card--clickable .stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 长题库名单行省略，不挤压右侧徽标。
+   首页卡片标题比通用 --fs-h2 再低一档（18px），让它和大标题之间有明显层级。 */
+.card--clickable .h2 {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list--banks .card--clickable .h2 {
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+/* 记录行：卡片内左侧信息竖排、右侧状态竖排（button 里只能用 span，所以显式横竖排） */
+.record__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.record__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* ------------------------------ 题目反馈 ------------------------------ */
+/* 轻量入口：图标 + 小字，不抢主操作按钮的视觉权重 */
+.fb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  box-shadow: none;
+  transition: var(--transition);
+}
+
+.fb-link svg {
+  display: block;
+}
+
+.fb-link:hover,
+.fb-link.state-hover {
+  box-shadow: var(--sh-up-hover);
+}
+
+.fb-link:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.fb-link:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+/* 题目卡片底部：反馈入口右对齐 */
+.fb-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 结果页行内：反馈 + 查看（不挤压左侧文字） */
+.row__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* 手机：正文保证最小宽度，放不下时把星标/反馈/查看整组折到第二行右端，
+   而不是把「你选的是 A」压成三行 */
+@media (max-width: 480px) {
+  .row {
+    flex-wrap: wrap;
+  }
+  .row__main {
+    min-width: 140px;
+  }
+  .row__actions {
+    margin-left: auto;
+  }
+}
+
+/* 反馈面板：自动带上的定位信息 */
+.fb-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fb-info__row {
+  display: flex;
+  gap: 10px;
+  font-size: var(--fs-sm);
+}
+
+.fb-info__key {
+  flex: 0 0 5.5em;
+  color: var(--ink-3);
+}
+
+.fb-info__val {
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* 问题类型：横排换行（复用开始一轮面板的 .choice-list，特异性要压过它的竖排） */
+.choice-list.choice-list--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.choice-list--row .btn--choice {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: var(--fs-sm);
+}
+
+/* 备注输入 */
+.fb-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fb-note__input {
+  resize: vertical;
+  min-height: 76px;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: var(--lh);
+}
+
+/* 提交后：可复制的文本预览 */
+.fb-text {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: var(--r-ctl);
+  background: var(--bg);
+  box-shadow: var(--sh-in-sm);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 反馈箱一行 */
+.fb-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fb-card__main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fb-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fb-card__side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* ------------------------------ 维护日志 ------------------------------ */
+.cl-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cl-item__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------ 按钮 ------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  box-shadow: var(--sh-up);
+  cursor: pointer;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 普通按钮：悬停掉一整档 8/16 → 4/8（2px 的收紧在 46px 高的按钮上看不出来，
+   按规范「悬停 = 阴影缩小」取一整档）；位置、尺寸、字色都不动 */
+.btn:hover,
+.btn.state-hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+.btn:active {
+  box-shadow: var(--sh-in);
+}
+
+.btn:focus-visible {
+  box-shadow: var(--sh-up), var(--sh-focus);
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--on-accent); /* 白字 */
+  font-weight: 600;
+}
+
+/* 主按钮：底色亮一档（表面变化）+ 阴影收紧到 6/12。底色变化是主反馈，阴影是附加 */
+.btn--primary:hover,
+.btn--primary.state-hover {
+  box-shadow: var(--sh-up-hover);
+  background: var(--accent-hover);
+}
+
+.btn--primary:active {
+  box-shadow: var(--sh-in);
+}
+
+.btn--primary:focus-visible {
+  box-shadow: var(--sh-up), var(--sh-focus);
+}
+
+.btn--ghost {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+  padding: 0 14px;
+  min-height: 44px;
+}
+
+/* 文字按钮（顶栏返回 / 交卷）：透明底，悬停浮出 --bg-2 淡底 + 字色变深，阴影保持无 */
+.btn--ghost:hover {
+  background: var(--bg-2);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.btn--ghost:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.btn--ghost:focus-visible {
+  box-shadow: var(--sh-focus);
+}
+
+/* 柔和凸起：中性底 + 双影，比 ghost 高一档（顶栏的夜间按钮用它）
+   顶栏控件只有 40px 高，属小控件：默认 --sh-up-sm，悬停保持 4/8 不再收 */
+.btn--soft {
+  background: var(--bg);
+  box-shadow: var(--sh-up);
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.btn--soft:hover,
+.btn--soft.state-hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+/* 上面这条与预览页的 .state-hover.btn（6/12）同特异性、位置更靠前，
+   会让顶栏按钮被误升到 6/12。这里用三条类名压住，保证小控件始终停在 4/8。 */
+.btn.btn--soft.state-hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+.btn--soft:active {
+  box-shadow: var(--sh-in);
+}
+
+.btn--soft:focus-visible {
+  box-shadow: var(--sh-up), var(--sh-focus);
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* 次要按钮：压在最浅一档凸起上，悬停不再抬层级——改浮出 --bg-2 淡底作反馈 */
+.btn.btn--quiet {
+  box-shadow: var(--sh-up-sm);
+}
+
+.btn.btn--quiet:hover,
+.btn.btn--quiet.state-hover {
+  background: var(--bg-2);
+  box-shadow: var(--sh-up-sm);
+}
+
+.btn.btn--quiet:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.btn.btn--quiet:focus-visible {
+  box-shadow: var(--sh-up-sm), var(--sh-focus);
+}
+
+/* 结果页底部的两个「只切页面」的动作：纯文字层级，和主按钮拉开 */
+.result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 小号入口按钮：图标 + 文案，一行塞三个也不挤（练习记录 / 错题本 / 收藏练习）。
+   它是「导航型」入口，反馈方式跟底部 .list-row 一致：悬停浮出 --bg-2 淡底 + 字色变深，
+   再顺手把阴影从 4/8 收到 3/6；位置、尺寸、圆角一律不动（小控件不跟着变大）。 */
+.btn--mini {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  border-radius: var(--r-pill);
+  box-shadow: var(--sh-up-sm);
+  gap: 6px;
+  color: var(--ink-2);
+  background: transparent;
+}
+
+/* 前缀 .btn 是为了压过后面的预览镜像类 .state-hover.btn（同特异性、位置更靠后） */
+.btn.btn--mini:hover,
+.btn.btn--mini.state-hover {
+  background: var(--bg-2);
+  color: var(--ink);
+  box-shadow: var(--sh-up-xs);
+}
+
+/* 按下去：底色留着（否则像被「掏空」），阴影翻成内凹 */
+.btn.btn--mini:active {
+  background: var(--bg-2);
+  box-shadow: var(--sh-in-sm);
+}
+
+/* 焦点环只叠加，不改变阴影层级 */
+.btn.btn--mini:focus-visible {
+  box-shadow: var(--sh-up-sm), var(--sh-focus);
+}
+
+/* 禁用态（n=0）不响应悬停：阴影、字色、底色、不透明度全都不变 */
+.btn.btn--mini[disabled]:hover,
+.btn.btn--mini[aria-disabled="true"]:hover,
+.btn.btn--mini[disabled].state-hover,
+.btn.btn--mini[aria-disabled="true"].state-hover {
+  background: transparent;
+  box-shadow: var(--sh-up-sm);
+  color: var(--ink-2);
+  opacity: 0.5;
+}
+
+/* 置灰时整体压到 .5（.btn 的通用禁用规则是 .55，用三条类名压住它的顺序） */
+.btn.btn--mini[disabled],
+.btn.btn--mini[aria-disabled="true"] {
+  opacity: 0.5;
+}
+
+.btn--mini .mini-ico {
+  flex: 0 0 auto;
+  display: block;
+  opacity: 0.85;
+}
+
+.btn--mini .mini-label {
+  white-space: nowrap;
+}
+
+.btn[disabled],
+.btn[aria-disabled="true"] {
+  opacity: 0.55;
+  box-shadow: var(--sh-up-sm);
+  cursor: not-allowed;
+}
+
+.btn--primary[disabled],
+.btn--primary[aria-disabled="true"] {
+  /* 停用的强调按钮要「熄掉」：不透明，回到中性底 + 弱字 + 内凹，一眼看得出不能点 */
+  background: var(--bg);
+  color: var(--ink-3);
+  box-shadow: var(--sh-in-sm);
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.btn--primary[disabled]:hover,
+.btn--primary[aria-disabled="true"]:hover {
+  background: var(--bg);
+  box-shadow: var(--sh-in-sm);
+}
+
+.btn--ghost[disabled] {
+  box-shadow: none;
+}
+
+/* ------------------------------ 星标（收藏） ------------------------------ */
+/* 题目卡片徽标行右端 / 结果页行尾：一个圆形软按钮，不抢选项的视觉权重 */
+.star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--sh-up-sm);
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 小控件（顶栏按钮、chip）固定停在 4/8：悬停不再抬高层级，
+   改浮出 --bg-2 淡底作可见反馈；星标同样适用（按下才凹进去） */
+.star:hover,
+.star.state-hover {
+  background: var(--bg-2);
+  box-shadow: var(--sh-up-sm);
+}
+
+.star:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.star:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+/* 已收藏：用强调色 + 内凹（像按下去的一颗钉） */
+.star[aria-pressed="true"] {
+  color: var(--accent);
+  box-shadow: var(--sh-in-sm);
+}
+
+/* 结果页行尾的星标：不抢「查看」按钮的位置，去掉自动左推 */
+.row__actions .star {
+  margin-left: 0;
+}
+
+/* ------------------------------ 选项 ------------------------------ */
+.opt {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: var(--bg);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: var(--sh-up-sm);
+  cursor: pointer;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 选项是页面上的高频操作，默认就压在最浅一档凸起上（4/8 → 4/8 没有变化），
+   所以悬停改浮出 --bg-2 淡底作表面反馈；按下才凹进去。
+   已提交后的 correct / wrong / dimmed / invalid 带 disabled，不响应悬停。 */
+.opt:hover,
+.opt.state-hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+.opt:not([disabled]):not(.opt--selected):hover,
+.opt:not([disabled]):not(.opt--selected).state-hover {
+  background: var(--bg-2);
+}
+
+/* 已选中（未提交）本来就是凹陷态：悬停用强调色淡底，不再改阴影 */
+.opt--selected:hover,
+.opt--selected.state-hover {
+  background: var(--accent-soft);
+  box-shadow: var(--sh-in);
+}
+
+.opt:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.opt:focus-visible {
+  box-shadow: var(--sh-up-sm), var(--sh-focus);
+}
+
+/* 选中 / 已判定的选项获得焦点时，必须保持凹陷状态，只叠加焦点环。
+   否则焦点环会把「凹陷」覆盖成「凸起」，破坏规范里“选中 = 凹陷”的规则。 */
+.opt--selected:focus-visible {
+  box-shadow: var(--sh-in), var(--sh-focus);
+}
+
+/* 字母胶囊：凹陷的小圆片，选中/判定后换成实心色 */
+.opt__key {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: var(--sh-in-sm);
+  transition: var(--transition);
+}
+
+.opt__body {
+  flex: 1 1 auto;
+  min-width: 0; /* 让内部 pre 能收缩并横向滚动 */
+}
+
+/* 状态文字标签（正确 / 你的选择） */
+.opt__tag {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* 选中（未提交）：凹陷 + 徽标强调色 */
+.opt--selected {
+  box-shadow: var(--sh-in);
+}
+
+.opt--selected:hover {
+  box-shadow: var(--sh-in);
+}
+
+.opt--selected .opt__key {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--sh-in-sm);
+}
+
+/* 判定后：正确 / 错误。颜色 + 图标 + 文字标签 + 左侧状态条四重表达 */
+.opt--correct {
+  box-shadow: var(--sh-in);
+  cursor: default;
+}
+
+/* 左侧 3px 状态条：判完的选项不用只靠颜色分辨对错 */
+.opt--correct::before,
+.opt--wrong::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--r-pill);
+}
+
+.opt--correct::before {
+  background: var(--ok);
+}
+
+.opt--wrong::before {
+  background: var(--bad);
+}
+
+.opt--correct .opt__key {
+  background: var(--ok);
+  color: var(--on-ok);
+  box-shadow: var(--sh-in-sm);
+}
+
+.opt--wrong {
+  box-shadow: var(--sh-in);
+  cursor: default;
+}
+
+.opt--wrong .opt__key {
+  background: var(--bad);
+  color: var(--on-accent);
+  box-shadow: var(--sh-in-sm);
+}
+
+.opt--dimmed {
+  box-shadow: var(--sh-up-sm);
+  color: var(--ink-3);
+  cursor: default;
+}
+
+/* 已判定 / 置灰的选项不再「抬起」：悬停保持各自的状态阴影。
+   .opt:hover 特异性更高（0,2,0 > 0,1,0），不在这里显式压住，交卷后
+   鼠标扫过正确项就会把它从凹陷顶成凸起——同一张卡片里只有一个选项变样。 */
+.opt--correct:hover,
+.opt--wrong:hover {
+  box-shadow: var(--sh-in);
+}
+
+.opt--dimmed:hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+/* 数据异常题：平面化，无阴影，不可选 */
+.opt--invalid {
+  box-shadow: none;
+  background: var(--bg);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.opt--invalid:hover,
+.opt--invalid:active {
+  box-shadow: none;
+}
+
+/* 判定后不可再点 */
+.opt[disabled] {
+  cursor: default;
+}
+
+/* ------------------------------ 状态提示条 ------------------------------ */
+.tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r-ctl);
+  box-shadow: var(--sh-in-sm);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+.tip__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tip--ok .tip__icon {
+  background: var(--ok);
+  color: var(--on-ok);
+}
+
+.tip--bad .tip__icon {
+  background: var(--bad);
+  color: var(--on-accent);
+}
+
+.tip--info .tip__icon {
+  background: var(--mid);
+  color: var(--ink-2);
+}
+
+.tip__title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* 提示条正文 + 「标题行」（右侧放「修改答案」，375px 自动换行不挤） */
+.tip__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: block;
+}
+
+.tip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
+
+/* 文字按钮：小一号、次要色、无底框，不抢底部主操作 */
+.linkbtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* 文字链接按钮（修改答案 / 全部记录）：悬停浮出 --bg-2 淡底 + 字色加深，不只靠字色 */
+.linkbtn:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.linkbtn:active {
+  background: var(--bg-2);
+  box-shadow: var(--sh-in-sm);
+}
+
+.linkbtn:focus-visible {
+  box-shadow: var(--sh-focus);
+  outline: none;
+}
+
+/* 数据异常提示：12px 灰字，无阴影 */
+.notice {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  line-height: 1.6;
+}
+
+/* 「已解锁，改完再提交」：比数据异常提示更显眼一点（它是一条可操作的状态） */
+.notice--soft {
+  padding: 10px 14px;
+  border-radius: var(--r-ctl);
+  box-shadow: var(--sh-in-sm);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+/* 解析区 */
+.explain {
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--mid);
+}
+
+.explain__label {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+
+/* ------------------------------ 进度条 ------------------------------ */
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress__track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--mid);
+  box-shadow: var(--sh-in-sm);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+
+/* 章节刻度：按该章累计题数占全库的比例定位，1px 细线，压暗不抢进度 */
+.progress__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink-3);
+  opacity: 0.35;
+}
+
+.progress__value {
+  flex: 0 0 auto;
+  min-width: 44px;
+  text-align: right;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 进度行文字：第 x/y 题 + 已答对 n 道 + 题型徽标 + 跳转 + 收藏星
+   一行放不下时（375px）允许换行，右侧工具组整体落到第二行右端 */
+.meta {
+  position: relative;
+  z-index: 1; /* 跳转提示压在进度条上，别被后面的兄弟节点盖住 */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.meta__info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.meta__count {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.meta__ok {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* 徽标在 meta 行里统一 24px 高，不跟正文行高走 */
+.meta__tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meta__tags .badge {
+  height: 24px;
+  padding: 0 9px;
+  line-height: 1;
+}
+
+.meta__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 星标从题目卡搬到这里：不再需要「自动左推」，位置由工具组决定 */
+.meta__tools .star {
+  margin-left: 0;
+}
+
+/* ------------------------------ 题号跳转 ------------------------------ */
+.jump {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 56×28 的凹陷输入框：只放「第几题」这种短数字 */
+.jump__input {
+  width: 56px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  box-shadow: var(--sh-in-sm);
+  transition: var(--transition);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.jump__input::placeholder {
+  color: var(--ink-3);
+}
+
+.jump__input:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-in-sm), var(--sh-focus);
+}
+
+/* 28px 小按钮：和输入框齐高，始终停在 4/8 一档 */
+.jump__btn {
+  flex: 0 0 auto;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--sh-up-sm);
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.jump__btn:hover {
+  background: var(--bg-2);
+  box-shadow: var(--sh-up-sm);
+}
+
+.jump__btn:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.jump__btn:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-up-sm), var(--sh-focus);
+}
+
+/* 非法输入的提示：贴着输入框下方，11px --bad，2 秒后自己消失（不做抖动） */
+.jump__hint {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--bad);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.jump__hint[hidden] {
+  display: none;
+}
+
+/* --------------------- 宽屏侧边跳转浮窗（≥1080px） --------------------- */
+/* 默认不出现：窄屏用 meta 行里那个跳转组，两种形态不并存 */
+.jump-dock {
+  display: none;
+}
+
+@media (min-width: 1080px) {
+  /* 答题页两侧的空白够宽了：跳转搬到内容右边。fixed 定位不参与文档流，
+     出现/消失不会改变正文宽度（不会横向滚动、不会跳动） */
+  .jump-dock {
+    position: fixed;
+    top: 96px;
+    right: calc((100vw - 760px) / 2 - 142px);
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 130px;
+    padding: 10px;
+    border-radius: var(--r-ctl);
+    background: var(--bg);
+    box-shadow: var(--sh-up-sm);
+  }
+
+  /* 同一功能只留一个入口 */
+  .meta__tools .jump {
+    display: none;
+  }
+
+  /* 「总览」文字按钮：展开 / 收起浮窗里的答题卡，不抢「确认跳转」的位 */
+  .jump-dock__overview {
+    align-self: stretch;
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .jump-dock__overview:hover,
+  .jump-dock__overview.state-hover {
+    background: var(--bg-2);
+    color: var(--ink);
+  }
+
+  .jump-dock__overview:focus-visible {
+    outline: none;
+    box-shadow: var(--sh-focus);
+  }
+
+  .jump-dock__card[hidden] {
+    display: none;
+  }
+
+  .jump-dock__count {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .jump-dock__input {
+    width: 106px;
+    height: 28px;
+    margin: 0 auto;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    font-size: 12px;
+    text-align: center;
+    box-shadow: var(--sh-in-sm);
+    transition: var(--transition);
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .jump-dock__input::placeholder {
+    color: var(--ink-3);
+  }
+
+  .jump-dock__input:focus-visible {
+    outline: none;
+    box-shadow: var(--sh-in-sm), var(--sh-focus);
+  }
+
+  .jump-dock__btn {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: var(--bg);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    box-shadow: var(--sh-up-sm);
+    transition: var(--transition);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .jump-dock__btn:hover {
+    background: var(--bg-2);
+    box-shadow: var(--sh-up-sm);
+  }
+
+  .jump-dock__btn:active {
+    box-shadow: var(--sh-in-sm);
+  }
+
+  .jump-dock__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--sh-up-sm), var(--sh-focus);
+  }
+
+  .jump-dock__btn.state-hover {
+    background: var(--bg-2);
+  }
+
+  .jump-dock__hint {
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--bad);
+    text-align: center;
+  }
+
+  .jump-dock__hint[hidden] {
+    display: none;
+  }
+}
+
+/* ------------------------------ 答题卡（题号网格） ------------------------------ */
+/* 一格一题：未答 --mid / 答对 --ok / 答错 --bad；当前题加焦点环。
+   宽屏侧边浮窗与窄屏覆盖层共用这套格子，外层容器只决定宽度和可滚高度。 */
+.answer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.answer-card__stats {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 宽屏浮窗只有 130px：统计拆成两行短句（未答 216 / 对 2 · 错 1），各自不折 */
+.answer-card__stats--side {
+  display: flex;
+  flex-direction: column;
+}
+
+.answer-card__stats-line {
+  white-space: nowrap;
+}
+
+.answer-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.answer-card__cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--mid);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 悬停反馈：阴影从「无」跨到 4px 一档；底色是状态信息，不能拿来当反馈 */
+.answer-card__cell:hover,
+.answer-card__cell.state-hover {
+  box-shadow: var(--sh-up-sm);
+}
+
+.answer-card__cell:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.answer-card__cell:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+.answer-card__cell--correct {
+  background: var(--ok);
+  color: var(--on-ok);
+}
+
+.answer-card__cell--wrong {
+  background: var(--bad);
+  color: var(--on-accent);
+}
+
+/* 当前题：字重 600 + 焦点环；未答的当前格换成 --bg，答过的保留对 / 错底色 */
+.answer-card__cell--current {
+  font-weight: 600;
+  color: var(--ink);
+  box-shadow: var(--sh-focus);
+}
+
+.answer-card__cell--current.answer-card__cell--unanswered {
+  background: var(--bg);
+}
+
+.answer-card__cell--current.answer-card__cell--correct {
+  color: var(--on-ok);
+}
+
+.answer-card__cell--current.answer-card__cell--wrong {
+  color: var(--on-accent);
+}
+
+/* 数据异常题：底色照旧，只在右下角点一个 4px 小点 */
+.answer-card__cell--invalid::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+/* 宽屏浮窗里的答题卡：网格最高 320px 后自己滚，219 题不把浮窗撑出屏幕 */
+.jump-dock--card-open {
+  max-height: calc(100vh - 112px);
+  overflow-y: auto;
+}
+
+.jump-dock .answer-card__grid {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px; /* 滚动条贴边时不压住最后一列格子 */
+  /* 130px 的浮窗里塞不下一条 15px 的滚动条：留着它，格子会被挤成 2 列 44px。
+     这里藏掉滚动条（滚轮 / 键盘 / Tab 仍能滚），横竖都留给 32px 的格子。 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.jump-dock .answer-card__grid::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* 窄屏 meta 行的「总览」按钮：宽屏同一功能在侧边浮窗里，这颗由下面的媒体查询藏起来 */
+.card-toggle {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.card-toggle:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.card-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+/* 窄屏答题卡覆盖层：铺满视口、卡片居中；卡片限高 60vh，网格在里面滚动 */
+.card-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 38;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.card-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+}
+
+.card-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 360px;
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border-radius: var(--r-card);
+  background: var(--bg);
+  box-shadow: var(--sh-up);
+}
+
+.card-overlay__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.card-overlay__title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.card-overlay__close {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.card-overlay__close:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.card-overlay__close:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+}
+
+/* 覆盖层里的网格不再单独限高——可滚高度交给卡片本身的 60vh */
+.card-overlay .answer-card__grid {
+  max-height: none;
+}
+
+@media (min-width: 1080px) {
+  /* 宽屏：答题卡在侧边浮窗里展开，meta 行按钮与覆盖层都不出场 */
+  .card-toggle--meta,
+  .card-overlay {
+    display: none;
+  }
+}
+
+/* ------------------------------ 结果页：环形正确率 + 统计行 ------------------------------ */
+.result-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ring {
+  position: relative;
+  flex: 0 0 auto;
+  width: 72px;
+  height: 72px;
+}
+
+.ring svg {
+  display: block;
+  width: 72px;
+  height: 72px;
+}
+
+.ring__track {
+  stroke: var(--mid);
+}
+
+.ring__bar {
+  stroke: var(--accent);
+}
+
+.ring__value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  min-width: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stat__value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__label {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+@media (max-width: 480px) {
+  .result-head {
+    gap: 12px;
+  }
+  .stats {
+    gap: 6px 16px;
+  }
+  .stat__value {
+    font-size: 15px;
+  }
+}
+
+/* 徽标行（题型 / 章节 / 数据异常） */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ------------------------------ 徽标 ------------------------------ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  background: var(--mid);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.badge--accent {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ------------------------------ 输入框 ------------------------------ */
+.input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-body);
+  box-shadow: var(--sh-in);
+  transition: var(--transition);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.input::placeholder {
+  color: var(--ink-3);
+}
+
+.input:hover {
+  box-shadow: var(--sh-in);
+}
+
+/* 聚焦时变浅（通道打开），不加深 */
+.input:focus {
+  outline: none;
+  box-shadow: var(--sh-in-sm), var(--sh-focus);
+}
+
+/* ------------------------------ 开关 ------------------------------ */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  transition: var(--transition);
+}
+
+.switch__track {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 30px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  box-shadow: var(--sh-in-sm);
+  transition: var(--transition);
+}
+
+.switch__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  box-shadow: var(--sh-up-sm);
+  transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.switch[aria-checked="true"] .switch__knob {
+  transform: translateX(22px);
+  background: var(--accent);
+}
+
+.switch:focus-visible .switch__track {
+  box-shadow: var(--sh-in-sm), var(--sh-focus);
+}
+
+/* ------------------------------ 底部操作区 ------------------------------ */
+.actionbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  background: var(--bg);
+  padding: 12px var(--pad-page) calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+.actionbar__inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: var(--content-w);
+  margin: 0 auto;
+}
+
+.actionbar__inner .btn {
+  flex: 1 1 0;
+}
+
+.actionbar__inner .btn--primary {
+  flex: 1.2 1 0;
+}
+
+/* 窄屏下三键均分，保证拇指可点 */
+@media (max-width: 400px) {
+  .actionbar__inner {
+    gap: 8px;
+  }
+  .actionbar__inner .btn {
+    padding: 0 12px;
+  }
+}
+
+/* ------------------------------ 列表 ------------------------------ */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-list);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 12px 2px;
+  font-size: var(--fs-sm);
+}
+
+/* 题型色点：单选强调色 / 多选成功色 / 判断中性灰，和答题页分布条同一套颜色 */
+.row__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+.row__dot--single {
+  background: var(--accent);
+}
+
+.row__dot--multiple {
+  background: var(--ok);
+}
+
+.row__dot--judge {
+  background: var(--ink-3);
+}
+
+.row + .row {
+  border-top: 1px solid var(--mid);
+}
+
+.row__idx {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.row__status {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.row__status--ok {
+  color: var(--ink-2);
+}
+
+.row__status--bad {
+  color: var(--ink);
+}
+
+.row__status--skip {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* 题库卡片 + 下面一行入口：整体作为一个块参与列表间距 */
+.bank-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 一个题库一组：卡片 + 入口 + 那句 0 题小字。宽屏时这一组是网格的一格。 */
+.bank-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 题库卡片下方的一行入口：练习记录 / 错题本 / 收藏练习（小号、不占整行）。
+   允许换行是为了那句 0 题的小字——它挤不下时退到第二行，
+   而不是被压成 0 宽看不见（375px 三个按钮本身仍是排在一行的）。 */
+.bank-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 0 个时的那一句小字：跟在按钮后面，能跟就跟，跟不下就自己一行。
+   长句（「还没有错题 · 还没有标记的题」）给桌面与平板，短句给 ≤480px。 */
+.bank-note {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-note--narrow {
+  display: none;
+}
+
+/* ------------------------------ 首页 Hero ------------------------------ */
+/* Hero 是装饰性导语，不是可复制内容：整块不可选中，鼠标也不是文本光标。
+   只作用于 .hero —— 题干、选项、解析、结果页文字仍然可选（那些是有用内容）。 */
+.hero {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* 首页整页也是导航装饰：卡片标题、题数、图例、入口、底部两行、页脚全都不可选中，
+   手机上长按也不弹 iOS 的「复制 / 全选」菜单。答题页与结果页不受影响。 */
+.page--list {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 与 .page--list 相对：答题页与结果页的文字一律显式可选（题干、选项、解析、
+   错题行、答案文本都可能被用户复制），单写 text 是为了把这条变成唯一事实。 */
+.page--quiz,
+.page--result {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 标题是页面的第一层：48/34px、700、紧行高、微负字距。
+   用 .hero__title 而不是复用 .h1 —— .h1 是别处页面标题的尺寸，首页要更重一层。 */
+.hero__title {
+  margin: 0;
+  font-size: 48px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -1px;
+  color: var(--ink);
+}
+
+/* 标题后半句用强调色：同字号同字重，靠颜色把「今天刷哪套？」和卡片标题分开。
+   深色下 --accent-ink 会自动换成亮一档的紫。 */
+.hero__accent {
+  color: var(--accent-ink);
+}
+
+/* 与 Hero 相对：真正有信息量的文字一律显式可选。
+   默认 auto 本来就能选，这里写死 text，一是把「这些能选、Hero 不能选」变成唯一事实，
+   二是防将来给某个上层容器加 none 时被继承下来。 */
+.rich,
+.opt__body,
+.explain__label {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 题干里的代码块、结果页的答案文本也照此处理 */
+.rich pre,
+.rich code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 标题下的强调色短横：视觉锚点，不是边框也不是色块 */
+.hero__rule {
+  display: block;
+  width: 32px;
+  height: 3px;
+  margin-top: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* 副文案：短横下方 8px，13px --ink-2，一个数字都不带 */
+.hero__sub {
+  margin-top: 8px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+/* 三个统计胶囊：已练 / 错题 / 收藏。凹陷铭牌，数字在前。
+   选择器要比 .page-head > * + * 更具体，否则上间距会被压成 --gap-tight。 */
+.hero > .hero__pills {
+  margin-top: 20px;
+}
+
+.hero__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  box-shadow: var(--sh-in-sm);
+}
+
+.hero__num {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.hero__label {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* 卡片内的文字区：标题+题数、分布条上下排 */
+.bank-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ------------------------------ 题型分布条 ------------------------------ */
+.dist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 14px;
+}
+
+/* 槽底 --mid，三段按题数分配宽度，段间 2px 空隙 */
+.dist__bar {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--mid);
+  overflow: hidden;
+}
+
+.dist__seg {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+}
+
+/* 单选 --accent / 多选 --ok / 判断 --ink-3（不用黄色，深浅两套都够对比） */
+.dist__seg--single {
+  background: var(--accent);
+}
+
+.dist__seg--multiple {
+  background: var(--ok);
+}
+
+.dist__seg--judge {
+  background: var(--ink-3);
+}
+
+.dist__legend {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* ------------------------------ 首页底部列表行 ------------------------------ */
+/* 反馈箱 / 维护日志：左图标 + 文字 + 右箭头，无外阴影（不跟上面的卡片抢层级）。
+   这一行本身就是「可点」，所以 hover 用底色而不是凸起阴影。 */
+.list-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: var(--gap-block);
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.list-row:hover,
+.list-row.state-hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.list-row:hover .row-arrow,
+.list-row.state-hover .row-arrow {
+  color: var(--ink-2);
+}
+
+.list-row:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.list-row:focus-visible {
+  box-shadow: var(--sh-focus);
+  outline: none;
+}
+
+.list-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 左右两个 18px 图标都不参与伸缩：375px 下文字省略，箭头不会被挤走 */
+.row-ico,
+.row-arrow {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.row-arrow {
+  color: var(--ink-3);
+  transition: var(--transition);
+}
+
+/* ------------------------------ 首页页脚 ------------------------------ */
+/* 装饰性说明：不参与选中/复制，鼠标也不该出现文本光标 */
+.page-foot {
+  margin-top: 32px;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* 分隔线：1px --mid 再压到 60% 不透明度（连文字一起压会看不清，所以只压线） */
+.page-foot::before {
+  content: '';
+  display: block;
+  height: 1px;
+  background: var(--mid);
+  opacity: 0.6;
+  margin-bottom: 16px;
+}
+
+.page-foot__text {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* 页脚里若以后加了链接，单独把那部分放开选中 */
+.page-foot a {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ------------------------------ 首页最近练习 ------------------------------ */
+/* 故意不加外阴影：上面已经有凸起卡片，这一区靠分隔线与 hover 底色表达「可点」，
+   层级自然落在卡片下面，不会把首页拉成一堆同样重的块。 */
+.recent__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.recent__title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.recent__all {
+  flex: 0 0 auto;
+  text-decoration: none;
+  color: var(--ink-3);
+  /* 内边距用等量负外边距抵掉：悬停浮出淡底时位置与尺寸不变 */
+  padding: 2px 8px;
+  margin: -2px -8px;
+  border-radius: var(--r-pill);
+  transition: var(--transition);
+}
+
+/* 文字链接（全部记录）：悬停浮出 --bg-2 淡底 + 字色加深，不只靠字色 */
+.recent__all:hover {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.recent__list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 一条一行：左（题库名 + 范围）/ 中（正确率 + 答对 x / y）/ 右（时间 + ›） */
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  height: 56px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+/* 行与行之间用 1px 分隔线（压到 60%，和页脚同一种做法），首行不画。
+   用伪元素而不是 border/box-shadow：行本身还要用 box-shadow 表达 :active 与焦点环，
+   两套阴影叠在同一个属性上会互相顶掉，分隔线也会跟着 hover 抖一下。 */
+.recent-row {
+  position: relative;
+}
+
+.recent-row + .recent-row::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  height: 1px;
+  background: var(--mid);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.recent-row:hover,
+.recent-row.state-hover {
+  background: var(--bg-2);
+}
+
+.recent-row + .recent-row:hover::before,
+.recent-row + .recent-row.state-hover::before {
+  opacity: 0;
+}
+
+.recent-row:active {
+  box-shadow: var(--sh-in-sm);
+}
+
+.recent-row:focus-visible {
+  box-shadow: var(--sh-focus);
+  outline: none;
+}
+
+.recent-row__left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.recent-row__bank {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-row__scope {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-row__mid {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.recent-row__score {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.recent-row__hint {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.recent-row__side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.recent-row__when {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.recent-row .row-arrow {
+  color: var(--ink-3);
+  transition: var(--transition);
+}
+
+.recent-row:hover .row-arrow,
+.recent-row.state-hover .row-arrow {
+  color: var(--ink-2);
+}
+
+/* 空态：一句话 + 一个小号「开始」 */
+.recent__empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 10px;
+}
+
+.recent__empty-text {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+
+.recent__start {
+  flex: 0 0 auto;
+}
+
+/* 首页在手机上的两处调整必须写在这里（首页规则之后），
+   否则同名选择器的桌面规则会按源码顺序把这些值盖回去。 */
+@media (max-width: 767px) {
+  /* 标题桌面 48px → 手机 34px（通用 --fs-h1 是 26px，首页单独一档） */
+  .hero__title {
+    font-size: 34px;
+  }
+
+  /* 三个入口在 375px 仍要排成一行：缩内边距与图标间距，不缩 gap（仍是 8px） */
+  .btn--mini {
+    padding: 0 7px;
+    font-size: var(--fs-xs);
+    gap: 4px;
+  }
+
+  /* 最近练习在手机上折成两行：第一行「题库名 + 时间」，第二行「范围 + 正确率」。
+     靠 display:contents 把四个格子重新排进两列网格，不用改 DOM 结构。 */
+  .recent-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'bank side'
+      'scope score';
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 2px;
+    height: auto;
+    min-height: 56px;
+    padding: 10px;
+  }
+
+  .recent-row__left,
+  .recent-row__mid {
+    display: contents;
+  }
+
+  .recent-row__bank {
+    grid-area: bank;
+  }
+
+  .recent-row__side {
+    grid-area: side;
+  }
+
+  .recent-row__scope {
+    grid-area: scope;
+  }
+
+  .recent-row__score {
+    grid-area: score;
+    text-align: right;
+  }
+
+  /* 手机上正确率已经写着了，「答对 x / y」再占一行会把两行布局撑成三行 */
+  .recent-row__hint {
+    display: none;
+  }
+}
+
+/* 更窄的手机（≤480px）：三个入口继续压字号与内边距，目标仍是「一行三个」。
+   375px 实测放得下；320px 若折成 2+1，只把行距收紧到 4px，不许横向滚动。 */
+@media (max-width: 480px) {
+  .btn--mini {
+    padding: 0 8px;
+    font-size: 11.5px;
+    gap: 6px;
+  }
+
+  /* 图标跟着字号收一档（内联 svg 的 width/height 是 14，这里用 CSS 盖掉） */
+  .btn--mini .mini-ico {
+    width: 13px;
+    height: 13px;
+  }
+
+  .bank-actions {
+    row-gap: 4px;
+  }
+
+  /* 空题库提示：窄屏换短句，避免在入口下面单独折一行 */
+  .bank-note--narrow {
+    display: inline;
+  }
+
+  .bank-note--wide {
+    display: none;
+  }
+}
+
+/* 宽屏（≥1024px）：只有首页放宽并把两张题库卡片并排。
+   答题页/结果页仍卡在 --content-w（760px）单列 —— 答题要专注，两栏会把题干切成窄条。
+   断点选 1024 是因为 960 + 两侧各 60px 留白需要 1080 左右才舒展；
+   容器封顶 960px，1920px 窗口也只会居中留白，不跟着无限拉宽。 */
+@media (min-width: 1024px) {
+  .page--wide {
+    max-width: 960px;
+  }
+
+  /* 顶栏跟着首页一起放宽，站名铭牌与 H1 左对齐、主题按钮与卡片右缘对齐。
+     用 body[data-view="list"] 限定：答题页/结果页/记录等仍是 760，与各自内容对齐。 */
+  body[data-view="list"] .topbar__inner {
+    max-width: 960px;
+  }
+
+  /* Hero：左边标题+副文案，右边三枚胶囊，基线靠底对齐 */
+  .hero {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .hero__main {
+    min-width: 0;
+  }
+
+  /* 横排时胶囊在右端底部对齐，上边距就没有意义了 */
+  .hero > .hero__pills {
+    margin-top: 0;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
+
+  /* 两个题库并排：一格一个 .bank-group（卡片 + 三入口 + 空态小字） */
+  .list--banks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* 双栏里那句 0 题小字会折行，而三个 chip 自己就写着 0，信息重复 —— 只在双栏隐藏 */
+  .list--banks .bank-note {
+    display: none;
+  }
+}
+
+/* ------------------------------ 错题本 ------------------------------ */
+.wb-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-list);
+}
+
+.wb-group__title {
+  margin-bottom: 8px;
+}
+
+/* 行本身已有纵向内边距，卡片上下收一点，分组之间不至于空一大块 */
+.wb-group .card {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* 桌面：一行四格（题号 / 题型 / 题干 / 次数与时间）；窄屏：题干换到第二行占满 */
+.wb-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+
+.wb-row .badge {
+  justify-self: start;
+}
+
+/* 题干摘要：宽屏只留一行，用省略号收掉，不把行撑高 */
+.wb-stem {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.wb-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* 窄屏：题干单独占第二行，最多两行；次数/时间留在第一行右侧 */
+@media (max-width: 560px) {
+  .wb-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .wb-row .row__idx {
+    grid-area: 1 / 1;
+  }
+
+  .wb-row .badge {
+    grid-area: 1 / 2;
+  }
+
+  .wb-row .wb-side {
+    grid-area: 1 / 3;
+  }
+
+  .wb-row .wb-stem {
+    grid-area: 2 / 1 / 3 / 4;
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: 1.5;
+  }
+}
+
+/* ------------------------------ 确认弹窗 ------------------------------ */
+.modal__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--overlay);
+}
+
+.modal {
+  position: fixed;
+  z-index: 41;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(calc(100vw - 32px), 420px);
+  padding: var(--pad-card);
+  border-radius: var(--r-card);
+  background: var(--bg);
+  box-shadow: var(--sh-up);
+}
+
+.modal > * + * {
+  margin-top: 12px;
+}
+
+.modal__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal__actions .btn {
+  flex: 1 1 0;
+}
+
+/* 确认框里的次要按钮（「取消」）：悬停浮出 --bg-2 淡底 + 字色 --ink，
+   阴影从 8/16 收到 3/6；按下转内凹。模态里原先只有 8/16→6/12 的 2px 收紧，
+   在灰底弹窗上几乎看不出来（这就是「悬停毫无反应」的原因）。 */
+.modal__actions .btn:not(.btn--primary):hover,
+.modal__actions .btn:not(.btn--primary).state-hover {
+  background: var(--bg-2);
+  color: var(--ink);
+  box-shadow: var(--sh-up-xs);
+}
+
+.modal__actions .btn:not(.btn--primary):active {
+  background: var(--bg-2);
+  box-shadow: var(--sh-in-sm);
+}
+
+/* ------------------------------ 开始一轮面板 ------------------------------ */
+/* 内容比确认弹窗长：限高并内部滚动，免得小屏溢出屏幕 */
+.modal--panel {
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+/* 选项行：文字靠左、说明靠右 */
+.btn--choice {
+  justify-content: space-between;
+  text-align: left;
+  padding: 0 16px;
+  font-size: var(--fs-sm);
+}
+
+/* 带图标的范围行（全部 / 按章节 / 随机）：图标、文字、说明三段。
+   改成 flex-start + 让说明自己撑满剩余宽度，图标与文字才会挨在一起，
+   不会因为 space-between 被推到两端挤成「图标在左、文字在中间」。 */
+.btn--ico {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.btn--ico > span:first-of-type {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.btn--ico > .num {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* 图标只占 20px，不缩也不换行；颜色跟状态走（未选灰、悬停深一点、选中用强调色） */
+.scope-ico {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  color: var(--ink-3);
+}
+
+.btn--choice:hover .scope-ico,
+.btn--choice.state-hover .scope-ico {
+  color: var(--ink-2);
+}
+
+/* 选中：和文字同一个令牌（亮色下就是 --accent 本身，深色下用它的提亮版保证对比度） */
+.btn--choice[aria-pressed="true"] .scope-ico {
+  color: var(--accent-ink);
+}
+
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 二级选项（章节 / 随机档位）：缩进一级，和父项区分开 */
+.choice-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 12px;
+}
+
+.choice-sub .btn {
+  flex: 0 1 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: var(--fs-sm);
+}
+
+.choice-list.choice-sub {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.choice-list.choice-sub .btn {
+  flex: 1 1 auto;
+}
+
+/* 随机题数：三个快捷档 + 自定义输入框，一起排一行；窄屏换行也保持整齐 */
+.count-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+}
+
+.count-row .btn {
+  flex: 0 1 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: var(--fs-sm);
+}
+
+.count-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.count-input {
+  width: 62px;
+  min-height: 40px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: center;
+  box-shadow: var(--sh-in-sm);
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.count-input:focus {
+  outline: none;
+  box-shadow: var(--sh-in-sm), var(--sh-focus);
+}
+
+.count-unit {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+/* 选中态：凹陷 + 强调色文字，和题目选项 .opt--selected 同一套语言。
+   没有它就只有 aria-pressed 变了、肉眼什么都看不出来。 */
+.btn--choice[aria-pressed="true"] {
+  box-shadow: var(--sh-in-sm);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.btn--choice[aria-pressed="true"] .num {
+  color: var(--accent-ink);
+}
+
+.btn--choice[aria-pressed="true"]:hover {
+  background: var(--accent-soft);
+  box-shadow: var(--sh-in-sm);
+}
+
+/* ------------------------------ 预览页专用状态类 ------------------------------
+   仅用于 style-preview.html 静态展示 :hover / :active 效果。
+   生产页面不要使用。值与上面的 :hover / :active 规则保持一一对应。
+   ------------------------------------------------------------------------- */
+/* 按钮悬停：普通按钮掉一整档 8/16 → 4/8；主按钮底色亮一档、阴影 6/12；
+   卡片与选项保持 4/8（面积大，靠底色 / 阴影变化）；文字型按钮浮出 --bg-2 淡底 */
+.state-hover.btn {
+  box-shadow: var(--sh-up-sm);
+}
+
+.state-hover.btn--primary {
+  background: var(--accent-hover);
+  box-shadow: var(--sh-up-hover);
+}
+
+.state-hover.card--clickable,
+.state-hover.opt {
+  box-shadow: var(--sh-up-sm);
+}
+
+.state-hover.opt:not([disabled]):not(.opt--selected) {
+  background: var(--bg-2);
+}
+
+.state-hover.opt--selected {
+  background: var(--accent-soft);
+  box-shadow: var(--sh-in);
+}
+
+.state-hover.btn--ghost {
+  background: var(--bg-2);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.state-hover.btn--quiet {
+  background: var(--bg-2);
+}
+
+.state-hover.linkbtn {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+.state-hover.star {
+  background: var(--bg-2);
+}
+
+.state-hover.jump__btn {
+  background: var(--bg-2);
+}
+
+.state-active.btn,
+.state-active.card--clickable,
+.state-active.opt {
+  box-shadow: var(--sh-in);
+}
+
+.state-active.btn--ghost {
+  box-shadow: var(--sh-in-sm);
+}
+
+.state-focus.btn {
+  box-shadow: var(--sh-up), var(--sh-focus);
+}
+
+.state-focus.opt {
+  box-shadow: var(--sh-up), var(--sh-focus);
+}
+
+.state-focus.opt--selected {
+  box-shadow: var(--sh-in), var(--sh-focus);
+}
+
+.state-focus.input {
+  box-shadow: var(--sh-in-sm), var(--sh-focus);
+}

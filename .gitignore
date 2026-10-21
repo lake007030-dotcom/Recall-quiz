@@ -1,0 +1,14 @@
+# 会话记录体积大且只留本机（用户选择不推）
+docs/会话记录/
+
+# 服务端运行时数据（保留目录占位）
+server/data/*
+!server/data/.gitkeep
+
+# 临时与系统文件
+.tmp-*/
+*.tmp
+*.log
+Thumbs.db
+.DS_Store
+desktop.ini

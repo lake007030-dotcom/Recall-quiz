@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e0e5ec">
+<title>风格样张 · Recall</title>
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  /* 样张页专用：只做「标签 + 样例」的排版，不含任何颜色/阴影定义 */
+  .demo {
+    display: grid;
+    gap: 14px;
+  }
+  .demo__label {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+  .demo__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .demo__col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .demo__item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .demo__sep {
+    height: 1px;
+    background: var(--mid);
+    margin: 6px 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="page stack--block">
+
+  <header class="stack">
+    <h1 class="h1">风格样张</h1>
+    <p class="muted--2">新拟物 / Soft UI · 所有样式来自 <code>css/styles.css</code>，本页不含任何硬编码颜色或阴影。</p>
+    <p class="muted">光源固定左上角：右下暗影 + 左上亮影。悬停 = 阴影缩小；按下 = 凸起变凹陷，无位移。</p>
+  </header>
+
+  <!-- ============ 按钮 ============ -->
+  <section class="card demo">
+    <h2 class="h2">按钮</h2>
+
+    <div class="demo__label">次要按钮</div>
+    <div class="demo__row">
+      <div class="demo__item">
+        <button type="button" class="btn">默认</button>
+        <span class="demo__label">凸起</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn state-hover">悬停</button>
+        <span class="demo__label">阴影缩小</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn state-active">按下</button>
+        <span class="demo__label">凹陷</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn" disabled>禁用</button>
+        <span class="demo__label">55% 透明</span>
+      </div>
+    </div>
+
+    <div class="demo__sep"></div>
+
+    <div class="demo__label">主按钮</div>
+    <div class="demo__row">
+      <div class="demo__item">
+        <button type="button" class="btn btn--primary">提交</button>
+        <span class="demo__label">默认</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn btn--primary state-hover">提交</button>
+        <span class="demo__label">悬停</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn btn--primary state-active">提交</button>
+        <span class="demo__label">按下</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn btn--primary" disabled>提交</button>
+        <span class="demo__label">禁用</span>
+      </div>
+    </div>
+
+    <div class="demo__sep"></div>
+
+    <div class="demo__label">文字按钮 / 键盘焦点</div>
+    <div class="demo__row">
+      <div class="demo__item">
+        <button type="button" class="btn btn--ghost">交卷</button>
+        <span class="demo__label">ghost</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="btn state-focus">焦点环</button>
+        <span class="demo__label">0 0 0 3px 强调色 35%</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 选项 ============ -->
+  <section class="card demo">
+    <h2 class="h2">选项</h2>
+    <p class="muted">判定后不只靠颜色：徽标变色 + ✓/✕ 图标 + 文字标签三重表达。</p>
+
+    <div class="demo__col">
+      <div class="demo__item">
+        <button type="button" class="opt">
+          <span class="opt__key" aria-hidden="true">A</span>
+          <span class="opt__body">未选：凸起卡片条，字母徽标凸起</span>
+        </button>
+        <span class="demo__label">默认</span>
+      </div>
+
+      <div class="demo__item">
+        <button type="button" class="opt state-hover">
+          <span class="opt__key" aria-hidden="true">A</span>
+          <span class="opt__body">悬停：阴影缩小</span>
+        </button>
+        <span class="demo__label">悬停</span>
+      </div>
+
+      <div class="demo__item">
+        <button type="button" class="opt opt--selected">
+          <span class="opt__key" aria-hidden="true">B</span>
+          <span class="opt__body">选中：凹陷，徽标变强调色</span>
+        </button>
+        <span class="demo__label">选中（未提交）</span>
+      </div>
+
+      <div class="demo__item">
+        <button type="button" class="opt opt--correct" disabled>
+          <span class="opt__key" aria-hidden="true">B</span>
+          <span class="opt__body">正确项：凹陷，青绿徽标</span>
+          <span class="opt__tag">✓ 正确答案</span>
+        </button>
+        <span class="demo__label">判定 · 正确</span>
+      </div>
+
+      <div class="demo__item">
+        <button type="button" class="opt opt--wrong" disabled>
+          <span class="opt__key" aria-hidden="true">A</span>
+          <span class="opt__body">错选项：凹陷，珊瑚徽标</span>
+          <span class="opt__tag">✕ 你的选择</span>
+        </button>
+        <span class="demo__label">判定 · 错误</span>
+      </div>
+
+      <div class="demo__item">
+        <button type="button" class="opt opt--dimmed" disabled>
+          <span class="opt__key" aria-hidden="true">C</span>
+          <span class="opt__body">未选且非正确答案：弱化</span>
+        </button>
+        <span class="demo__label">判定 · 无关项</span>
+      </div>
+
+      <div class="demo__item">
+        <button type="button" class="opt opt--invalid" disabled>
+          <span class="opt__key" aria-hidden="true">D</span>
+          <span class="opt__body">数据异常：平面化，无阴影，不可选</span>
+        </button>
+        <span class="notice">本题数据异常，不计入判分</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 卡片 ============ -->
+  <section class="card demo">
+    <h2 class="h2">卡片</h2>
+    <div class="demo__label">普通卡片（凸起 22px 圆角）</div>
+    <div class="card">卡片内容：<code>--bg</code> 底、凸起双影、无边框。</div>
+
+    <div class="demo__label">可点击卡片（悬停阴影缩小）</div>
+    <button type="button" class="card card--clickable">
+      <span class="stack">
+        <span class="h2">Java程序设计题库</span>
+        <span class="muted num">219 题</span>
+      </span>
+      <span class="badge">进入</span>
+    </button>
+    <div class="demo__row">
+      <div class="demo__item">
+        <button type="button" class="card card--clickable state-hover">
+          <span class="stack">
+            <span class="h2">悬停状态</span>
+            <span class="muted">阴影缩小</span>
+          </span>
+          <span class="badge">进入</span>
+        </button>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="card card--clickable state-active">
+          <span class="stack">
+            <span class="h2">按下状态</span>
+            <span class="muted">凹陷</span>
+          </span>
+          <span class="badge">进入</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 进度条 ============ -->
+  <section class="card demo">
+    <h2 class="h2">进度条</h2>
+    <div class="demo__label">凹槽轨道 + 强调色填充（80% 不透明）+ 等宽数字</div>
+    <div class="progress">
+      <div class="progress__track"><div class="progress__fill" style="width:0%"></div></div>
+      <span class="progress__value num">0%</span>
+    </div>
+    <div class="progress">
+      <div class="progress__track"><div class="progress__fill" style="width:38%"></div></div>
+      <span class="progress__value num">38%</span>
+    </div>
+    <div class="progress">
+      <div class="progress__track"><div class="progress__fill" style="width:100%"></div></div>
+      <span class="progress__value num">100%</span>
+    </div>
+  </section>
+
+  <!-- ============ 输入框 ============ -->
+  <section class="card demo">
+    <h2 class="h2">输入框</h2>
+    <div class="demo__col">
+      <div class="demo__item">
+        <input class="input" type="text" placeholder="默认：凹陷 4px">
+        <span class="demo__label">默认</span>
+      </div>
+      <div class="demo__item">
+        <input class="input state-focus" type="text" value="聚焦：凹陷变浅为 2px">
+        <span class="demo__label">聚焦（通道打开，不加深）</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 开关 ============ -->
+  <section class="card demo">
+    <h2 class="h2">开关</h2>
+    <div class="demo__row">
+      <div class="demo__item">
+        <button type="button" class="switch" aria-checked="false">
+          <span class="switch__track"><span class="switch__knob"></span></span>
+          <span>关</span>
+        </button>
+        <span class="demo__label">轨道凹陷，圆点凸起归位</span>
+      </div>
+      <div class="demo__item">
+        <button type="button" class="switch" aria-checked="true">
+          <span class="switch__track"><span class="switch__knob"></span></span>
+          <span>开</span>
+        </button>
+        <span class="demo__label">圆点变强调色并右移</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 统计卡 ============ -->
+  <section class="card demo">
+    <h2 class="h2">统计卡</h2>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat__value">98</div>
+        <div class="stat__label">答对</div>
+      </div>
+      <div class="stat">
+        <div class="stat__value">21</div>
+        <div class="stat__label">答错</div>
+      </div>
+      <div class="stat">
+        <div class="stat__value">82%</div>
+        <div class="stat__label">正确率</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 提示条 ============ -->
+  <section class="card demo">
+    <h2 class="h2">提示条</h2>
+    <div class="demo__col">
+      <div class="tip tip--ok">
+        <span class="tip__icon" aria-hidden="true">✓</span>
+        <span><span class="tip__title">答对了</span><br>正确答案是 B</span>
+      </div>
+      <div class="tip tip--bad">
+        <span class="tip__icon" aria-hidden="true">✕</span>
+        <span><span class="tip__title">答错了</span><br>正确答案是 B<br>你选的是 A</span>
+      </div>
+      <div class="tip tip--info">
+        <span class="tip__icon" aria-hidden="true">i</span>
+        <span>还有 12 题没做，确定交卷？</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 徽标 ============ -->
+  <section class="card demo">
+    <h2 class="h2">徽标</h2>
+    <div class="demo__row">
+      <span class="badge">单选题</span>
+      <span class="badge">HTML基础</span>
+      <span class="badge badge--accent">继续 12</span>
+    </div>
+  </section>
+
+  <!-- ============ 富文本 ============ -->
+  <section class="card demo">
+    <h2 class="h2">富文本（题干渲染）</h2>
+    <p class="muted">代码块保留缩进与空行；行内代码与粗体；HTML 标签按字面量显示。</p>
+    <div class="rich" id="richDemo"></div>
+  </section>
+
+</div>
+
+<script src="js/core/rich-text.js"></script>
+<script>
+  // 用真实的渲染器展示一段含代码块 / 行内代码 / 列表 / 粗体的样例
+  var sample = [
+    '在 CSS 中，用于设置元素**外边距**的属性是（　）',
+    '',
+    '```java',
+    'public class ScoreService {',
+    '',
+    '    // 所有成绩塞进一个 Map',
+    '    private Map<String, Integer> scores = new HashMap<>();',
+    '',
+    '    public void add(String studentId, String courseId, int score) {',
+    '        scores.put(studentId + "_" + courseId, score);',
+    '    }',
+    '}',
+    '```',
+    '',
+    '阅读上面代码，判断下列说法：',
+    '',
+    '- 泛型写法 `Map<String, Integer>` 中的尖括号必须转义显示',
+    '- 标签 `<video>` 也按字面量显示',
+    '',
+    '1. 第一条约束',
+    '2. 第二条约束'
+  ].join('\n');
+
+  document.getElementById('richDemo').innerHTML = QuizRich.render(sample);
+</script>
+
+</body>
+</html>

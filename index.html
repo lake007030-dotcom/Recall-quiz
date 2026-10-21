@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e0e5ec">
+<title>Recall · 刷题</title>
+<link rel="stylesheet" href="css/styles.css">
+<!-- 主题：放在 head 里，加载即应用，避免首屏先闪一下浅色 -->
+<script src="js/core/store.js"></script>
+<script src="js/core/theme.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <button type="button" class="btn btn--ghost" id="btnBack" hidden>返回</button>
+    <span class="brand">
+      <span class="brand__dot" aria-hidden="true"></span>
+      <span class="topbar__title" id="topTitle">Recall</span>
+    </span>
+    <div class="topbar__actions">
+      <button type="button" class="btn btn--ghost" id="btnFinish" hidden>交卷</button>
+      <div class="theme-wrap">
+        <button type="button" class="btn btn--soft theme-btn" id="btnTheme" data-act="theme"
+          aria-haspopup="menu" aria-expanded="false" title="选择主题">跟随</button>
+        <div class="menu" id="themeMenu" role="menu" aria-labelledby="btnTheme" hidden></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="app"></main>
+<div id="modalRoot"></div>
+
+<!-- 数据（由 tools/convert-banks.mjs 生成，只放数据；changelog 人工维护） -->
+<script src="js/data/java.js"></script>
+<script src="js/data/web.js"></script>
+<script src="js/data/changelog.js"></script>
+
+<!-- 核心：判题 / 存储（已在 head 里加载）/ 范围 / 会话 / 轮次快照 / 错题本 / 收藏 / 反馈箱 / 富文本 / 可选服务端 -->
+<script src="js/core/judge.js"></script>
+<script src="js/core/scope.js"></script>
+<script src="js/core/session.js"></script>
+<script src="js/core/round.js"></script>
+<script src="js/core/wrongbook.js"></script>
+<script src="js/core/stars.js"></script>
+<script src="js/core/feedback.js"></script>
+<script src="js/core/rich-text.js"></script>
+<!-- 可选服务端接入：只负责探活与提交反馈，file:// 下不发任何请求 -->
+<script src="js/core/api.js"></script>
+
+<!-- 视图 -->
+<script src="js/ui/copy.js"></script>
+<script src="js/ui/view-list.js"></script>
+<script src="js/ui/view-start.js"></script>
+<script src="js/ui/view-feedback.js"></script>
+<script src="js/ui/view-quiz.js"></script>
+<script src="js/ui/view-result.js"></script>
+<script src="js/ui/view-records.js"></script>
+<script src="js/ui/view-wrongbook.js"></script>
+<script src="js/ui/view-changelog.js"></script>
+
+<!-- 控制器 -->
+<script src="js/app.js"></script>
+
+</body>
+</html>

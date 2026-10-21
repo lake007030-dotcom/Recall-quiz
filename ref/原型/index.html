@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>刷题网站 · 参考原型</title>
+<style>
+  /* 参考原型：只实现了最基础的功能，页面中的题目为示例数据 */
+  :root{--bd:#e4e4e4;--mut:#8a8a8a;--pri:#2f6fd0;--ok:#1e8e3e;--bad:#d93025;--bg:#f6f7f9}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.7 -apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif;
+       color:#1b1b1b;background:var(--bg);-webkit-font-smoothing:antialiased}
+
+  .wrap{width:760px;margin:0 auto;padding:28px 24px 60px}
+
+  /* 顶部栏 */
+  .top{background:#fff;border-bottom:1px solid var(--bd);padding:14px 0}
+  .top .wrap{padding-top:0;padding-bottom:0;display:flex;justify-content:space-between;align-items:center}
+  .top .t{font-weight:600;font-size:15px}
+  .top .p{color:var(--mut);font-size:13.5px;font-variant-numeric:tabular-nums}
+
+  h1{font-size:20px;font-weight:600;margin:0 0 18px}
+  h2{font-size:16.5px;font-weight:600;margin:0 0 16px;line-height:1.65}
+
+  /* 题库列表 */
+  .bank{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:16px 18px;
+        margin-bottom:10px;cursor:pointer;display:flex;justify-content:space-between;
+        align-items:center;transition:.14s}
+  .bank:hover{border-color:var(--pri);background:#fafcff}
+  .bank .bn{font-size:15px;font-weight:500}
+  .bank .bc{color:var(--mut);font-size:13px}
+
+  /* 题目卡片 */
+  .card{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:20px 22px;margin-bottom:14px}
+  .qmeta{color:var(--mut);font-size:13px;margin-bottom:10px}
+
+  /* 选项 */
+  .opt{border:1px solid var(--bd);border-radius:8px;padding:12px 16px;margin-bottom:9px;
+       cursor:pointer;font-size:14.5px;line-height:1.6;transition:.14s;display:flex;gap:10px}
+  .opt:hover{border-color:#c8c8c8;background:#fafafa}
+  .opt .k{color:var(--mut);font-weight:600;flex:0 0 auto;min-width:18px}
+  .opt.sel{border-color:var(--pri);background:#eef3fd}
+  .opt.sel .k{color:var(--pri)}
+  .opt.right{border-color:var(--ok);background:#eaf7ee}
+  .opt.right .k{color:var(--ok)}
+  .opt.wrong{border-color:var(--bad);background:#fdecea}
+  .opt.wrong .k{color:var(--bad)}
+
+  /* 判题提示 */
+  .tip{margin-top:14px;padding:11px 15px;border-radius:8px;font-size:14px;background:#f2f4f7;color:#444}
+  .tip.ok{background:#eaf7ee;color:#166534}
+  .tip.no{background:#fdecea;color:#991b1b}
+
+  /* 操作按钮 */
+  .acts{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+  button{padding:9px 18px;font:inherit;font-size:14px;color:#333;background:#fff;
+         border:1px solid #d0d0d0;border-radius:8px;cursor:pointer;transition:.14s}
+  button:hover{background:#f3f3f3;border-color:#b8b8b8}
+  button.primary{background:var(--pri);border-color:var(--pri);color:#fff;font-weight:500}
+  button.primary:hover{background:#2560b8;border-color:#2560b8}
+
+  /* 结果页 */
+  .nums{display:flex;gap:12px;margin-bottom:16px}
+  .num{flex:1;background:#fff;border:1px solid var(--bd);border-radius:10px;
+       padding:16px 18px;text-align:center}
+  .num .v{font-size:26px;font-weight:700;color:var(--pri);font-variant-numeric:tabular-nums}
+  .num .l{color:var(--mut);font-size:12.5px;margin-top:3px}
+  .rev{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:6px 0}
+  .rev .row{display:flex;gap:10px;padding:9px 18px;font-size:13.5px;
+            border-bottom:1px solid #f2f2f2;align-items:baseline}
+  .rev .row:last-child{border-bottom:0}
+  .rev .idx{color:var(--mut);flex:0 0 52px;font-variant-numeric:tabular-nums}
+  .rev .st{flex:0 0 44px;font-weight:600}
+  .rev .st.y{color:var(--ok)}
+  .rev .st.n{color:var(--bad)}
+  .rev .an{color:var(--mut);font-size:12.5px}
+</style>
+</head>
+<body>
+
+<div class="top"><div class="wrap"><span class="t" id="topTitle">刷题</span><span class="p" id="topProg"></span></div></div>
+<div class="wrap" id="app"></div>
+
+<script>
+/* 参考原型：只实现了最基础的功能，页面中的题目为示例数据 */
+const BANKS = [
+  {
+    name: 'JavaScript 基础',
+    questions: [
+      { id: 1, type: 'single', question: '用于声明块级作用域变量的关键字是？',
+        options: ['var', 'let', 'function', 'class'], answer: ['B'] },
+      { id: 2, type: 'multiple', question: '以下哪些属于 JavaScript 基本数据类型？',
+        options: ['String', 'Number', 'Array', 'Boolean'], answer: ['A', 'B', 'D'] },
+      { id: 3, type: 'judge', question: 'typeof null 的结果是 "object"。',
+        options: ['正确', '错误'], answer: ['A'] },
+      { id: 4, type: 'single', question: '把 JSON 字符串解析成对象用哪个方法？',
+        options: ['JSON.stringify()', 'JSON.parse()', 'Object.assign()', 'Array.from()'], answer: ['B'] }
+    ]
+  },
+  {
+    name: '网络基础',
+    questions: [
+      { id: 1, type: 'single', question: 'HTTP 默认使用的端口号是？',
+        options: ['21', '80', '443', '8080'], answer: ['B'] },
+      { id: 2, type: 'judge', question: '404 表示服务器内部错误。',
+        options: ['正确', '错误'], answer: ['B'] },
+      { id: 3, type: 'multiple', question: '以下哪些属于 HTTP 请求方法？',
+        options: ['GET', 'POST', 'PUSH', 'DELETE'], answer: ['A', 'B', 'D'] }
+    ]
+  }
+];
+
+const app = document.getElementById('app');
+const topTitle = document.getElementById('topTitle');
+const topProg = document.getElementById('topProg');
+
+let bank = null;
+let index = 0;
+let picked = {};
+let done = {};
+let right = 0;
+
+function showBankList() {
+  topTitle.textContent = '刷题';
+  topProg.textContent = '';
+  let html = '<h1>选择题库</h1>';
+  BANKS.forEach(function (b, i) {
+    html += '<div class="bank" onclick="startBank(' + i + ')">' +
+            '<span class="bn">' + b.name + '</span>' +
+            '<span class="bc">' + b.questions.length + ' 题</span></div>';
+  });
+  app.innerHTML = html;
+}
+
+function startBank(i) {
+  bank = BANKS[i];
+  index = 0;
+  picked = {};
+  done = {};
+  right = 0;
+  showQuestion();
+}
+
+function showQuestion() {
+  const q = bank.questions[index];
+  topTitle.textContent = bank.name;
+  topProg.textContent = '第 ' + (index + 1) + ' / ' + bank.questions.length + ' 题';
+
+  let html = '<div class="card">';
+  html += '<div class="qmeta">第 ' + (index + 1) + ' 题 / 共 ' + bank.questions.length + ' 题</div>';
+  html += '<h2>' + q.question + '</h2>';
+
+  q.options.forEach(function (text, i) {
+    const k = String.fromCharCode(65 + i);
+    let cls = 'opt';
+    if ((picked[index] || []).indexOf(k) >= 0) cls += ' sel';
+    if (done[index]) {
+      if (q.answer.indexOf(k) >= 0) cls += ' right';
+      else if ((picked[index] || []).indexOf(k) >= 0) cls += ' wrong';
+    }
+    html += '<div class="' + cls + '" onclick="pick(\'' + k + '\')">' +
+            '<span class="k">' + k + '</span><span>' + text + '</span></div>';
+  });
+
+  if (done[index]) {
+    const p = picked[index] || [];
+    const ok = p.length === q.answer.length &&
+               p.every(function (k) { return q.answer.indexOf(k) >= 0; });
+    html += '<div class="tip ' + (ok ? 'ok' : 'no') + '">' +
+            (ok ? '答对了' : '答错了，正确答案：' + q.answer.join('、')) + '</div>';
+  }
+
+  html += '<div class="acts">';
+  html += '<button class="primary" onclick="submit()">提交</button>';
+  html += '<button onclick="prev()">上一题</button>';
+  html += '<button onclick="next()">下一题</button>';
+  html += '<button onclick="finish()">查看结果</button>';
+  html += '</div></div>';
+
+  app.innerHTML = html;
+}
+
+function pick(k) {
+  const q = bank.questions[index];
+  let p = picked[index] || [];
+  if (q.type === 'multiple') {
+    if (p.indexOf(k) >= 0) p.splice(p.indexOf(k), 1);
+    else p.push(k);
+  } else {
+    p = [k];
+  }
+  picked[index] = p;
+  showQuestion();
+}
+
+function submit() {
+  const q = bank.questions[index];
+  const p = picked[index] || [];
+  if (p.length === 0) return;
+  done[index] = true;
+  if (p.length === q.answer.length && p.every(function (k) { return q.answer.indexOf(k) >= 0; })) {
+    right++;
+  }
+  showQuestion();
+}
+
+function prev() {
+  index--;
+  showQuestion();
+}
+
+function next() {
+  index++;
+  showQuestion();
+}
+
+function finish() {
+  const total = bank.questions.length;
+  topTitle.textContent = '答题结果';
+  topProg.textContent = '';
+
+  let html = '<h1>答题结果</h1>';
+  html += '<div class="nums">';
+  html += '<div class="num"><div class="v">' + total + '</div><div class="l">总题数</div></div>';
+  html += '<div class="num"><div class="v">' + right + '</div><div class="l">答对</div></div>';
+  html += '<div class="num"><div class="v">' + Math.round(right / total * 100) + '%</div><div class="l">正确率</div></div>';
+  html += '</div>';
+
+  html += '<div class="rev">';
+  bank.questions.forEach(function (q, i) {
+    const p = picked[i] || [];
+    const ok = done[i] && p.length === q.answer.length &&
+               p.every(function (k) { return q.answer.indexOf(k) >= 0; });
+    html += '<div class="row">' +
+            '<span class="idx">第 ' + (i + 1) + ' 题</span>' +
+            '<span class="st ' + (ok ? 'y' : 'n') + '">' + (ok ? '正确' : '错误') + '</span>' +
+            '<span class="an">你的答案：' + (p.join('、') || '未作答') +
+            '　正确答案：' + q.answer.join('、') + '</span></div>';
+  });
+  html += '</div>';
+
+  html += '<div class="acts"><button onclick="showBankList()">返回题库列表</button></div>';
+  app.innerHTML = html;
+}
+
+showBankList();
+</script>
+</body>
+</html>
